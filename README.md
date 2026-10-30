@@ -193,8 +193,8 @@ Los casos de prueba permiten comprobar restricciones de planteles, horarios, san
 
 ## 👥 Integrantes
 
-Brian Rocha 
-Nahuel Benitez 
+Brian Rocha | 
+Nahuel Benitez | 
 Jorge Inzaurralde
 
 ## 📚 Fuente
