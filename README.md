@@ -8,6 +8,7 @@ Proyecto académico que consiste en diseñar e implementar un sistema de informa
 El sistema busca centralizar la inscripción de equipos y jugadores, la organización del fixture, el registro de resultados y sanciones, y la generación de reportes. De esta manera, se pretende evitar inconsistencias en la tabla de posiciones, superposiciones de partidos en una misma cancha y participación de jugadores suspendidos.
 Estado: En desarrollo. Este README describe los requisitos establecidos en la consigna; no implica que todas las funcionalidades estén implementadas.
 
+
 🎯 Objetivos
 - Gestionar las ediciones semestrales del torneo y sus participantes.
 - Organizar partidos, fechas, canchas y turnos sin superposiciones.
@@ -15,9 +16,9 @@ Estado: En desarrollo. Este README describe los requisitos establecidos en la co
 - Aplicar y controlar suspensiones.
 - Generar estadísticas y reportes para la organización.
 - Garantizar integridad, trazabilidad y controles de acceso.
+
   
 🛠️ Tecnologías y restricciones
-Componente	Tecnología o requisito
 Backend	Python
 Base de datos	MySQL (modelo relacional)
 Frontend	Framework de libre elección, si aplica
@@ -26,6 +27,7 @@ Seguridad	Permisos diferenciados a nivel de base de datos
 Validaciones	Frontend, backend y base de datos
 Control de versiones	Git / GitHub (repositorio público valorado)
 Contenedores	Docker y Docker Compose (opcionales, valorados)
+
 
 🧩 Funcionalidades requeridas
 Administración
@@ -43,6 +45,7 @@ Registro de partidos
 Roles
 - Administrador: gestiona toda la información del torneo.
 - Planillero: registra únicamente planillas, goles y tarjetas de partidos.
+
   
 📋 Reglas de negocio
 Torneos y equipos
@@ -69,6 +72,7 @@ Resultados y sanciones
 - Una tarjeta roja o la acumulación de 3 amarillas en una edición genera automáticamente una fecha de suspensión, a cumplir en la siguiente fecha.
 - La organización puede aplicar suspensiones disciplinarias de varias fechas.
 - Un jugador sancionado no puede participar en las planillas de las fechas alcanzadas por la suspensión.
+
   
 📊 Reportes requeridos
 1. Tabla de posiciones: partidos jugados, ganados, empatados y perdidos; goles a favor, en contra, diferencia y puntos.
@@ -81,6 +85,7 @@ Resultados y sanciones
 8. Sanciones: cantidad por equipo y por motivo.
 9. Estado de partidos: porcentaje jugados frente a postergados/cancelados.
 10. Tres consultas adicionales: a definir por el equipo de desarrollo.
+
 
 🗄️ Modelo de datos requerido
 La consigna establece como mínimo las siguientes tablas:
@@ -101,6 +106,7 @@ tarjeta	Tarjetas, color y minuto
 sancion_jugador	Motivo, inicio y duración de sanciones
 Se pueden incorporar tablas o atributos adicionales si su necesidad se fundamenta en el diseño.
 
+
 🚀 Ejecución local
 La consigna requiere un instructivo completo para ejecutar la aplicación localmente. Los comandos exactos se documentarán al definir la estructura y las dependencias reales del proyecto.
 
@@ -118,11 +124,13 @@ Pasos que deberá cubrir la instalación final:
 6. Verificar las funcionalidades y ejecutar los reportes.
 Pendiente: agregar comandos verificables de instalación y ejecución cuando estén definidos.
 
+
 🧪 Datos de prueba
 La entrega deberá incluir datos suficientes para ejecutar todos los reportes, con un mínimo de:
 - 6 equipos.
 - 3 fechas disputadas.
 Los casos de prueba también deberían permitir comprobar restricciones de planteles, horarios, sanciones, resultados y control de acceso.
+
 
 📦 Entregables
 - [ ] Script SQL completo para crear la base de datos y los datos maestros.
@@ -134,11 +142,13 @@ Los casos de prueba también deberían permitir comprobar restricciones de plant
 - [ ] Bitácora del trabajo realizado.
 - [ ] Bibliografía.
 
+
 📅 Fechas de la asignatura
 Publicación de consigna:	09/10/2026
 Avance:	30/10/2026
 Entrega: final	06/11/2026
 Defensas:	13/11/2026
+
 
 👥 Integrantes
 Brian Rocha
