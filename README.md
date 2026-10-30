@@ -1,150 +1,150 @@
-Trabajo Obligatorio
-Diseñar e implementar un sistema de información para la gestión del Torneo
-Interfacultades de Fútbol 5 de la universidad. El sistema debe permitir la organización
-del fixture, el registro de resultados y sanciones, y la generación de reportes que
-apoyen tanto a la organización del torneo como a la toma de decisiones.
-Gestión del Torneo Interfacultades de Fútbol 5
-La UCU organiza cada semestre el “Torneo Interfacultades de Fútbol 5”, en el que
-compiten equipos integrados por estudiantes, docentes y funcionarios de las distintas
-facultades. Actualmente, la inscripción de los equipos, el armado del fixture y el
-registro de los resultados se realizan en planillas de cálculo y grupos de mensajería, lo
-que provoca errores en la tabla de posiciones, partidos superpuestos en una misma
-cancha y jugadores suspendidos que igualmente salen a jugar.
-Lo que se pretende con este proyecto es brindarles a los organizadores del torneo un
-sistema unificado que permita mantener el control y la trazabilidad de los equipos,
-jugadores, partidos, resultados y sanciones de cada edición.
-Cada edición del torneo corresponde a un semestre y pasa por tres etapas: inscripción,
-en curso y finalizado. El torneo se juega en formato de liga a una sola rueda, es decir,
-todos los equipos se enfrentan entre sí una única vez. Los partidos se agrupan en
-fechas (fecha 1, fecha 2, etc.) y se disputan en las canchas de distintos complejos
-deportivos, en turnos de una hora entre las 18:00 y las 23:00 (de 18:00 a 19:00, de
-19:00 a 20:00, y así sucesivamente).
-Cada equipo representa a una facultad, tiene un nombre y un capitán, que debe ser
-uno de sus jugadores. Los jugadores pueden ser:
-● Estudiantes de grado o de posgrado
-● Docentes y funcionarios
-o Pueden integrar un equipo, pero cada plantel admite como máximo 2
-jugadores de este tipo
-El plantel de un equipo debe tener entre 5 y 10 jugadores, y todos deben pertenecer a
-la facultad que el equipo representa. Un jugador no puede integrar más de un equipo
-en una misma edición del torneo, y los planteles solo pueden modificarse mientras el
-torneo se encuentra en etapa de inscripción.
-Al programar un partido, el sistema debe controlar que:
-● Ambos equipos pertenezcan a la misma edición del torneo y tengan al menos 5
-jugadores en su plantel
-pág. 1
-Trabajo obligatorio – Sistema para Gestión del Torneo Interfacultades de Fútbol 5
-Base de Datos 1 – Universidad Católica del Uruguay
-Segundo Semestre 2026
-● Un equipo no se enfrente a sí mismo, ni a un rival con el que ya tenga un
-partido en esa edición (salvo que ese partido haya sido cancelado)
-● Un equipo no juegue más de un partido en la misma fecha del torneo
-● Una cancha no tenga más de un partido asignado en el mismo día y turno
-Una vez disputado el partido, el planillero registra en el sistema la planilla de juego, es
-decir, los jugadores de cada equipo que participaron del partido, junto con los goles
-(jugador y minuto) y las tarjetas amarillas y rojas recibidas. Solo pueden figurar en la
-planilla jugadores del plantel de alguno de los dos equipos que no estén suspendidos, y
-solo pueden convertir goles o recibir tarjetas los jugadores que figuren en la planilla. El
-resultado del partido se calcula a partir de los goles registrados, y un partido solo
-puede marcarse como jugado si su día y turno ya pasaron.
-Un partido jugado no puede eliminarse, y su resultado solo puede corregirse dentro de
-las 48 horas posteriores a su disputa. Por cada partido ganado se otorgan 3 puntos, por
-empate 1 y por derrota 0. La tabla de posiciones se ordena por puntos y, en caso de
-igualdad, por diferencia de goles y luego por goles a favor.
-Los jugadores que reciban una tarjeta roja, o que acumulen 3 tarjetas amarillas en la
-edición, serán sancionados automáticamente con una fecha de suspensión, que se
-cumple en la fecha siguiente del torneo. Además, la organización puede aplicar
-sanciones disciplinarias de varias fechas. Un jugador suspendido no puede figurar en la
-planilla de ningún partido correspondiente a las fechas que abarca su sanción.
-El sistema contará con dos tipos de usuario: los administradores, que gestionan toda la
-información del torneo, y los planilleros, que únicamente pueden registrar las planillas,
-goles y tarjetas de los partidos.
-La UCU está buscando implementar un primer acercamiento que facilite a los
-organizadores:
-● Alta, baja y modificación (ABM) de jugadores
-● ABM de equipos y sus planteles
-● ABM de complejos deportivos y canchas
-● ABM de partidos (teniendo en cuenta las reglas y restricciones enunciadas
-anteriormente)
-● Registro de planillas, goles y tarjetas de cada partido
-● ABM de sanciones a jugadores
-Con el fin de obtener métricas para el área de deportes de la universidad, se solicita
-además un sistema de reportes donde se pueda consultar:
-● Tabla de posiciones de una edición del torneo (partidos jugados, ganados,
-empatados y perdidos, goles a favor, goles en contra, diferencia de goles y
-puntos)
-● Tabla de goleadores (los 10 jugadores con más goles)
-pág. 2
-Trabajo obligatorio – Sistema para Gestión del Torneo Interfacultades de Fútbol 5
-Base de Datos 1 – Universidad Católica del Uruguay
-Segundo Semestre 2026
-● Tabla de fair play por equipo (1 punto por cada tarjeta amarilla y 3 por cada
-roja; el mejor equipo es el de menor puntaje)
-● Promedio de goles por partido en cada fecha y en toda la edición
-● Canchas y turnos más utilizados
-● Cantidad de jugadores por facultad y por tipo (grado, posgrado, docente,
-funcionario)
-● Jugadores inscriptos en un plantel que nunca figuraron en una planilla de juego
-● Cantidad de sanciones por equipo y por motivo
-● Porcentaje de partidos jugados vs. postergados/cancelados
-● Adicionar otras tres consultas sugeridas por ustedes.
-Para esto deberá crear una base de datos relacional (SQL) con al menos, las siguientes
-estructuras:
-● login (correo, contraseña, rol [administrador, planillero])
-● facultad (id_facultad, nombre)
-● jugador (ci, nombre, apellido, email, fecha_nacimiento, id_facultad, tipo [grado,
-posgrado, docente, funcionario])
-● torneo (id_torneo, nombre, anio, semestre, fecha_inicio, fecha_fin, estado
-[inscripción, en curso, finalizado])
-● equipo (id_equipo, nombre, id_torneo, id_facultad, ci_capitan)
-● equipo_jugador_torneo (id_equipo, ci_jugador. id_torneo, numero_camiseta)
-● complejo (id_complejo, nombre, dirección, departamento)
-● cancha (nombre_cancha, id_complejo, superficie [sintético, parquet], techada
-[true, false])
-● turno (id_turno, hora_inicio, hora_fin)
-● partido (id_partido, id_torneo, numero_fecha, id_equipo_local,
-id_equipo_visitante, dia, id_turno, nombre_cancha, id_complejo, estado
-[programado, jugado, postergado, cancelado])
-● planilla_partido (id_partido, ci_jugador, id_equipo)
-● gol (id_gol, id_partido, ci_jugador, minuto, autogol)
-● tarjeta (id_tarjeta, id_partido, ci_jugador, minuto, color [amarilla, roja])
-● sancion_jugador (id_sancion, ci_jugador, id_torneo, motivo [roja, acumulación
-de amarillas, disciplinaria], numero_fecha_inicio, cantidad_fechas)
-Los atributos subrayados forman la clave primaria y los atributos en cursiva son claves
-foráneas. En caso de que lo consideren necesario, se pueden crear tablas adicionales o
-agregar atributos.
-pág. 3
-Trabajo obligatorio – Sistema para Gestión del Torneo Interfacultades de Fútbol 5
-Base de Datos 1 – Universidad Católica del Uruguay
-Segundo Semestre 2026
-Requisitos del entregable
-● Script completo SQL para creación de base de datos y datos maestros
-o Debe incluir datos de prueba suficientes para ejecutar todos los
-reportes (al menos 6 equipos y 3 fechas disputadas)
-● Aplicación funcional:
-o Debe compilar
-o Debe implementar todos los requerimientos funcionales
-● Instructivo completo para correr la aplicación de forma local
-● Informe del trabajo realizado:
-o Fundamentar decisiones de implementación
-o Mejoras implementadas o consideradas en el modelo de datos
-o Bitácora del trabajo realizado
-o Bibliografía
-Consideraciones
-● El backend debe ser desarrollado en Python
-● La base de datos debe ser MySQL
-● El framework de frontend es de libre elección (si aplica)
-● No se puede utilizar ningún ORM
-● Restricciones de seguridad a nivel de base de datos (por ejemplo, usuarios de
-base de datos con permisos diferenciados para administradores y planilleros)
-● Validación de campos en todas las capas (front-end, back-end y base de datos)
-Se valorarán:
-● Utilización de repositorio de GitHub público
-● Dockerización de la aplicación y Docker-compose con servicios de app, bases de
-datos, etc
-Entrega de letra: 09/10/2026
-Avance: 30/10/2026
-Entrega final: 06/11/2026
-Defensas: 13/11/2026
-pág. 4
-Trabajo obligatorio – Sistema para Gestión del Torneo Interfacultades de Fútbol 5
+⚽ Sistema de Gestión del Torneo Interfacultades de Fútbol 5
+Trabajo Obligatorio — Base de Datos 1
+Universidad Católica del Uruguay (UCU) · Segundo semestre de 2026
+
+📌 Descripción
+Proyecto académico que consiste en diseñar e implementar un sistema de información para gestionar el Torneo Interfacultades de Fútbol 5 de la UCU.
+
+El sistema busca centralizar la inscripción de equipos y jugadores, la organización del fixture, el registro de resultados y sanciones, y la generación de reportes. De esta manera, se pretende evitar inconsistencias en la tabla de posiciones, superposiciones de partidos en una misma cancha y participación de jugadores suspendidos.
+Estado: En desarrollo. Este README describe los requisitos establecidos en la consigna; no implica que todas las funcionalidades estén implementadas.
+
+🎯 Objetivos
+- Gestionar las ediciones semestrales del torneo y sus participantes.
+- Organizar partidos, fechas, canchas y turnos sin superposiciones.
+- Registrar planillas de juego, goles y tarjetas.
+- Aplicar y controlar suspensiones.
+- Generar estadísticas y reportes para la organización.
+- Garantizar integridad, trazabilidad y controles de acceso.
+  
+🛠️ Tecnologías y restricciones
+Componente	Tecnología o requisito
+Backend	Python
+Base de datos	MySQL (modelo relacional)
+Frontend	Framework de libre elección, si aplica
+Acceso a datos	Sin ORM
+Seguridad	Permisos diferenciados a nivel de base de datos
+Validaciones	Frontend, backend y base de datos
+Control de versiones	Git / GitHub (repositorio público valorado)
+Contenedores	Docker y Docker Compose (opcionales, valorados)
+
+🧩 Funcionalidades requeridas
+Administración
+- ABM de jugadores.
+- ABM de equipos y sus planteles.
+- ABM de complejos deportivos y canchas.
+- ABM de partidos, respetando las reglas de programación.
+- ABM de sanciones a jugadores.
+- Gestión de ediciones del torneo y sus estados.
+Registro de partidos
+- Carga de la planilla de jugadores participantes.
+- Registro de goles (jugador y minuto) y tarjetas amarillas o rojas.
+- Cálculo del resultado a partir de los goles registrados.
+- Control de jugadores habilitados y plazos para corregir resultados.
+Roles
+- Administrador: gestiona toda la información del torneo.
+- Planillero: registra únicamente planillas, goles y tarjetas de partidos.
+  
+📋 Reglas de negocio
+Torneos y equipos
+- Cada torneo corresponde a un semestre y puede estar en estado inscripción, en curso o finalizado.
+- El formato es de liga a una sola rueda: cada pareja de equipos se enfrenta una vez por edición.
+- Cada equipo representa a una facultad y designa como capitán a uno de sus jugadores.
+- Cada plantel debe contar con 5 a 10 jugadores, todos pertenecientes a la facultad representada.
+- Se admiten como máximo 2 docentes o funcionarios por plantel.
+- Un jugador no puede integrar más de un equipo en la misma edición.
+- Los planteles solo se modifican durante la etapa de inscripción.
+Fixture y canchas
+- Los encuentros se agrupan por números de fecha.
+- Se programan turnos de una hora entre las 18:00 y las 23:00.
+- Los equipos de un partido deben pertenecer a la misma edición y tener al menos cinco integrantes.
+- Un equipo no puede jugar contra sí mismo, repetir un rival (salvo si el encuentro previo fue cancelado) ni disputar más de un partido en la misma fecha.
+- Una cancha no puede tener dos partidos el mismo día y turno.
+Resultados y sanciones
+- En las planillas solo pueden figurar integrantes de los equipos participantes que no estén suspendidos.
+- Solo los jugadores incluidos en la planilla pueden registrar goles o tarjetas.
+- Un partido solo puede marcarse como jugado una vez pasado su día y turno.
+- Los partidos jugados no pueden eliminarse; los resultados solo pueden corregirse durante las 48 horas posteriores.
+- Puntuación: victoria = 3 puntos, empate = 1, derrota = 0.
+- Desempates: puntos → diferencia de goles → goles a favor.
+- Una tarjeta roja o la acumulación de 3 amarillas en una edición genera automáticamente una fecha de suspensión, a cumplir en la siguiente fecha.
+- La organización puede aplicar suspensiones disciplinarias de varias fechas.
+- Un jugador sancionado no puede participar en las planillas de las fechas alcanzadas por la suspensión.
+  
+📊 Reportes requeridos
+1. Tabla de posiciones: partidos jugados, ganados, empatados y perdidos; goles a favor, en contra, diferencia y puntos.
+2. Tabla de goleadores: los diez jugadores con más goles.
+3. Fair play por equipo: 1 punto por amarilla y 3 por roja; gana el menor puntaje.
+4. Promedio de goles: por fecha y por edición.
+5. Utilización de instalaciones: canchas y turnos más usados.
+6. Jugadores por facultad y tipo: grado, posgrado, docente y funcionario.
+7. Jugadores sin participación: inscritos en un plantel que nunca aparecieron en una planilla.
+8. Sanciones: cantidad por equipo y por motivo.
+9. Estado de partidos: porcentaje jugados frente a postergados/cancelados.
+10. Tres consultas adicionales: a definir por el equipo de desarrollo.
+
+🗄️ Modelo de datos requerido
+La consigna establece como mínimo las siguientes tablas:
+Tabla	Finalidad
+login	Credenciales y roles de acceso
+facultad	Facultades participantes
+jugador	Datos personales, facultad y tipo de jugador
+torneo	Ediciones y estados del torneo
+equipo	Equipos, facultad y capitán
+equipo_jugador_torneo	Integrantes y números de camiseta por edición
+complejo	Complejos deportivos
+cancha	Canchas, superficies y condición de techado
+turno	Horarios de comienzo y finalización
+partido	Fixture, equipos, fecha, ubicación y estado
+planilla_partido	Participantes de cada partido
+gol	Goles, minutos y autogoles
+tarjeta	Tarjetas, color y minuto
+sancion_jugador	Motivo, inicio y duración de sanciones
+Se pueden incorporar tablas o atributos adicionales si su necesidad se fundamenta en el diseño.
+
+🚀 Ejecución local
+La consigna requiere un instructivo completo para ejecutar la aplicación localmente. Los comandos exactos se documentarán al definir la estructura y las dependencias reales del proyecto.
+
+Requisitos mínimos previstos:
+- Python (versión a confirmar).
+- Servidor MySQL (versión a confirmar).
+- Dependencias del backend (a documentar).
+- Frontend y herramientas adicionales, si corresponde.
+Pasos que deberá cubrir la instalación final:
+1. Clonar el repositorio.
+2. Configurar las credenciales y permisos de MySQL.
+3. Ejecutar el script de creación de base de datos y datos maestros.
+4. Cargar los datos de prueba.
+5. Instalar dependencias y levantar la aplicación.
+6. Verificar las funcionalidades y ejecutar los reportes.
+Pendiente: agregar comandos verificables de instalación y ejecución cuando estén definidos.
+
+🧪 Datos de prueba
+La entrega deberá incluir datos suficientes para ejecutar todos los reportes, con un mínimo de:
+- 6 equipos.
+- 3 fechas disputadas.
+Los casos de prueba también deberían permitir comprobar restricciones de planteles, horarios, sanciones, resultados y control de acceso.
+
+📦 Entregables
+- [ ] Script SQL completo para crear la base de datos y los datos maestros.
+- [ ] Datos de prueba suficientes para los reportes.
+- [ ] Aplicación funcional que compile y cumpla los requisitos.
+- [ ] Instructivo para ejecución local.
+- [ ] Informe con fundamentación de decisiones de implementación.
+- [ ] Mejoras implementadas o consideradas en el modelo de datos.
+- [ ] Bitácora del trabajo realizado.
+- [ ] Bibliografía.
+
+📅 Fechas de la asignatura
+Publicación de consigna:	09/10/2026
+Avance:	30/10/2026
+Entrega: final	06/11/2026
+Defensas:	13/11/2026
+
+👥 Integrantes
+Brian Rocha
+Nahuel Benitez
+Jorge Inzaurralde
+
+📚 Fuente
+Documento de consigna: «Obligatorio BD - Segundo Semestre 2026», Base de Datos 1, Universidad Católica del Uruguay.
+Proyecto académico — Universidad Católica del Uruguay, 2026.
