@@ -408,7 +408,7 @@ backend/
     └── test_reportes.py
 ```
 
-## Orden de desarrollo recomendado
+## Orden de desarrollo
 
 1. **Conexión, autenticación y permisos.** Configurar infraestructura y control de acceso.
 2. **Jugadores, equipos y planteles.** Construir las entidades y validar inscripciones.
