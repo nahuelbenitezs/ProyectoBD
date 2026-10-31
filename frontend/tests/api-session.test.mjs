@@ -145,3 +145,28 @@ test('la interfaz API muestra login sin requerir primero /bootstrap',async()=>{
     restore();
   }
 });
+
+
+test('login incorrecto muestra el error del backend y no dispara sesión vencida',async()=>{
+  prepare();
+  try{
+    globalThis.fetch=async()=>jsonResponse({error:'Correo o contraseña incorrectos.'},401);
+    await assert.rejects(login('x@test.uy','clave-erronea'),/Correo o contraseña incorrectos/);
+    assert.deepEqual(window.events,[]);
+  }finally{restore()}
+});
+
+test('logout en modo API revoca el token con Bearer y limpia la sesión local',async()=>{
+  prepare();
+  try{
+    sessionStorage.setItem(TOKEN_STORAGE_KEY,'token-ok');
+    sessionStorage.setItem(USER_STORAGE_KEY,JSON.stringify({correo:'x@test.uy',rol:'administrador'}));
+    let sent;
+    globalThis.fetch=async(url,options)=>{sent={url,options};return jsonResponse({ok:true})};
+    logout();
+    assert.equal(sessionStorage.getItem(TOKEN_STORAGE_KEY),null);
+    assert.equal(sent.url,`${API_BASE_URL}/auth/logout`);
+    assert.equal(sent.options.headers.Authorization,'Bearer token-ok');
+    assert.equal(sent.options.method,'POST');
+  }finally{restore()}
+});

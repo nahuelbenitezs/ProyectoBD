@@ -22,7 +22,7 @@ async function request(path,{method='GET',body}={}) {
  let res;
  try {res=await fetch(`${API_BASE_URL}${path}`,{method,headers:{'Accept':'application/json',...(body!==undefined?{'Content-Type':'application/json'}:{}),...(token?{'Authorization':`Bearer ${token}`}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})})}
  catch {throw Error('No se pudo conectar con el backend. Revisá que la API Python esté levantada y que CORS esté configurado.');}
- if(res.status===401){
+ if(res.status===401 && path!=='/auth/login'){
   sessionStorage.removeItem(TOKEN_STORAGE_KEY);
   sessionStorage.removeItem(USER_STORAGE_KEY);
   if(typeof window!=='undefined' && typeof Event!=='undefined')window.dispatchEvent(new Event('ucu:session-expired'));
@@ -37,7 +37,14 @@ export async function login(correo,contrasena){
  if(!data?.token||!['administrador','planillero'].includes(data?.user?.rol))fail('La API no devolvió token y rol válidos.');
  sessionStorage.setItem(TOKEN_STORAGE_KEY,data.token);sessionStorage.setItem(USER_STORAGE_KEY,JSON.stringify(data.user));return data.user;
 }
-export function logout(){sessionStorage.removeItem(TOKEN_STORAGE_KEY);sessionStorage.removeItem(USER_STORAGE_KEY)}
+export function logout(){
+ // Revocar el token del servidor sin impedir la salida si la red está caída.
+ if(!isDemo() && sessionStorage.getItem(TOKEN_STORAGE_KEY)){
+  request('/auth/logout',{method:'POST'}).catch(()=>{});
+ }
+ sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+ sessionStorage.removeItem(USER_STORAGE_KEY);
+}
 export async function loadData(){
  if(!isDemo()){
   const data=await request('/bootstrap');
