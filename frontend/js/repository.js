@@ -5,7 +5,14 @@ import {assertValid} from './validation.js';
 
 export const isDemo = () => localStorage.getItem(MODE_STORAGE_KEY)!=='api';
 export const setMode = (mode) => {localStorage.setItem(MODE_STORAGE_KEY,mode==='api'?'api':'demo');sessionStorage.removeItem(TOKEN_STORAGE_KEY);sessionStorage.removeItem(USER_STORAGE_KEY)};
-export const getSavedUser = () => {try{return JSON.parse(sessionStorage.getItem(USER_STORAGE_KEY)||'null')}catch{return null}};
+export const getSavedUser = () => {
+ // No mostrar la interfaz de una sesión anterior si ya no hay token.
+ if(!sessionStorage.getItem(TOKEN_STORAGE_KEY))return null;
+ try{
+  const user=JSON.parse(sessionStorage.getItem(USER_STORAGE_KEY)||'null');
+  return user?.correo && ['administrador','planillero'].includes(user.rol)?user:null;
+ }catch{return null}
+};
 export const demoUser = (role='administrador') => ({correo:role==='administrador'?'admin@demo.ucu.edu.uy':'planillero@demo.ucu.edu.uy',rol:role});
 export const demoReset = () => localStorage.removeItem(DEMO_STORAGE_KEY);
 const fail = (msg) => {throw Error(msg)};
@@ -15,7 +22,12 @@ async function request(path,{method='GET',body}={}) {
  let res;
  try {res=await fetch(`${API_BASE_URL}${path}`,{method,headers:{'Accept':'application/json',...(body!==undefined?{'Content-Type':'application/json'}:{}),...(token?{'Authorization':`Bearer ${token}`}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})})}
  catch {throw Error('No se pudo conectar con el backend. Revisá que la API Python esté levantada y que CORS esté configurado.');}
- if(res.status===401){sessionStorage.removeItem(TOKEN_STORAGE_KEY);sessionStorage.removeItem(USER_STORAGE_KEY);throw Error('Sesión vencida. Volvé a iniciar sesión.');}
+ if(res.status===401){
+  sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+  sessionStorage.removeItem(USER_STORAGE_KEY);
+  if(typeof window!=='undefined' && typeof Event!=='undefined')window.dispatchEvent(new Event('ucu:session-expired'));
+  throw Error('Sesión vencida. Volvé a iniciar sesión.');
+ }
  let data=null;try{data=await res.json()}catch{}
  if(!res.ok)throw Error(data?.error||data?.message||`La API respondió ${res.status}`);
  return data;

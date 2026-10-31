@@ -38,8 +38,9 @@ function table(headers,body,empty='No se encontraron resultados'){
  return `<div class="table-scroll"><table class="data-table"><thead><tr>${headers.map(x=>`<th>${esc(x)}</th>`).join('')}</tr></thead><tbody>${body||`<tr><td colspan="${headers.length}">${emptyState(empty)}</td></tr>`}</tbody></table></div>`;
 }
 function layout(){
- if(!state.db)return `<div class="initial-loading"><span>Preparando el tablero…</span></div>`;
+ // El formulario de acceso debe verse aunque todavía no se hayan cargado datos.
  if(!state.user)return loginView();
+ if(!state.db)return `<div class="initial-loading"><span>Preparando el tablero…</span></div>`;
  const tour=getTournament();
  return `<div class="shell theme-${state.theme}">
  <aside class="sidebar ${state.menuOpen?'mobile-open':''}">
@@ -357,6 +358,12 @@ app.addEventListener('change',e=>{
 });
 app.addEventListener('change',e=>{if(e.target.id==='tournament-picker'){state.tournament=Number(e.target.value);state.search='';rerender();if(state.page==='reportes')refreshReport()}});
 window.addEventListener('hashchange',()=>{const page=window.location.hash.slice(1);if(titles[page]&&state.page!==page)navigate(page)});
+window.addEventListener('ucu:session-expired',()=>{
+ // Un 401 puede llegar también mientras se consultan reportes o al guardar cambios.
+ logout();state.user=null;state.db=null;state.modal=null;
+ state.error='Tu sesión expiró. Iniciá sesión nuevamente.';
+ rerender();
+});
 
 async function init(){
  state.user=isDemo()?demoUser():getSavedUser();const page=window.location.hash.slice(1);state.page=titles[page]?page:'dashboard';
