@@ -1,6 +1,7 @@
 import {esc,ico,badge,fmtDate,fmtDay,timeHM,initials,normalize,emptyState,collator} from './utils.js';
 import {isDemo,setMode,getSavedUser,demoUser,demoReset,login,logout,loadData,loadReport,mutate} from './repository.js';
 import {standings,goalResult,sanctionsFor,isSuspended,reportDefs,reportFields} from './reports.js';
+import {canModify} from './permissions.js';
 
 const app=document.getElementById('app');
 const navGroups=[
@@ -193,6 +194,29 @@ function renderModal(){
 function loginView(){
  return `<div class="login-screen theme-${state.theme}"><div class="login-art"><div class="login-logo">${ico('football',28)} <strong>UCU <span>LEAGUE</span></strong></div><div class="login-art-content"><span class="eyebrow">TORNEO INTERFACULTADES DE FÚTBOL 5</span><h1>Una liga.<br/>Todas las<br/><em>facultades.</em></h1><p>La plataforma de gestión de partidos, planteles, resultados y estadísticas.</p></div><div class="login-pitch"><div class="pitch-center"></div></div><span class="login-footnote">BASE DE DATOS 1 · SEGUNDO SEMESTRE 2026</span></div><div class="login-form-area"><div class="login-form-card"><div class="eyebrow">${isDemo()?'MODO DEMOSTRACIÓN':'CONEXIÓN CON API PYTHON'}</div><h2>Bienvenido al torneo</h2><p>${isDemo()?'Elegí un rol para probar la interfaz. No se solicitan credenciales reales en modo demostración.':'Ingresá con tu usuario de la aplicación para conectar con el backend.'}</p>${isDemo()?`<div class="demo-login-options"><button class="login-role" data-action="login-demo" data-id="administrador"><span class="role-icon">${ico('shield',22)}</span><span><strong>Entrar como administrador</strong><small>Gestionar toda la competición</small></span>${ico('arrow',20)}</button><button class="login-role" data-action="login-demo" data-id="planillero"><span class="role-icon alternate">${ico('fixture',22)}</span><span><strong>Entrar como planillero</strong><small>Consultar y registrar partidos</small></span>${ico('arrow',20)}</button></div>`:`<form id="login-form"><label class="form-field"><span>Correo electrónico</span><input type="email" name="correo" placeholder="usuario@ucu.edu.uy" autocomplete="username" required/></label><label class="form-field"><span>Contraseña</span><input type="password" name="contrasena" placeholder="Contraseña" autocomplete="current-password" required/></label><button class="btn btn-primary login-submit" type="submit">${ico('arrow',18)} Iniciar sesión</button></form>`}${state.error?`<div class="login-error">${ico('alert',18)} ${esc(state.error)}</div>`:''}<div class="login-switch"><span>${isDemo()?'¿Ya tienen el backend funcionando?':'¿Todavía están desarrollando la API?'}</span><button data-action="toggle-mode">${isDemo()?'Usar backend Python':'Volver a la demostración'}</button></div></div></div></div>`;
 }
+function clearFieldErrors(form){
+ if(!form)return;
+ form.querySelectorAll('[aria-invalid="true"]').forEach(el=>el.removeAttribute('aria-invalid'));
+ form.querySelectorAll('.field-error,.validation-summary').forEach(el=>el.remove());
+}
+function showFieldErrors(form,issues){
+ if(!form||!issues?.length)return;
+ clearFieldErrors(form);
+ const summary=document.createElement('div');summary.className='validation-summary';summary.setAttribute('role','alert');
+ summary.textContent='Revisá los campos señalados antes de guardar. ' + issues.map(x=>x.message).join(' ');
+ const body=form.querySelector('.modal-body')||form;
+ body.prepend(summary);
+ for(const issue of issues){
+  if(!issue.field)continue;
+  const input=[...form.elements].find(el=>el.name===issue.field);
+  if(!input)continue;
+  input.setAttribute('aria-invalid','true');
+  const label=input.closest('.form-field');
+  if(label){const text=document.createElement('small');text.className='field-error';text.textContent=issue.message;label.append(text);}
+ }
+ const first=form.querySelector('[aria-invalid="true"]');
+ (first||summary).focus?.();
+}
 function notify(msg,type='success'){
  state.toast={msg,type};const area=document.getElementById('toast-area');if(area)area.innerHTML=`<div class="toast toast-${type}">${ico(type==='error'?'alert':'check',18)}${esc(msg)}<button data-action="clear-toast" class="toast-close">${ico('close',15)}</button></div>`;
 }
@@ -205,10 +229,16 @@ function open(kind,id='',extra=''){state.modal={kind,id,extra};rerenderModalOrFu
 function rerenderModalOrFull(){const existing=document.querySelector('.modal-backdrop');if(existing)existing.remove();if(state.modal)document.querySelector('.shell')?.insertAdjacentHTML('beforeend',renderModal())}
 async function commit(kind,action,body,options={}){
  try{
+  if(!canModify(state.user?.rol,kind,action))throw Error('Esta operación no está permitida para tu rol.');
   state.db=await mutate(state.db,kind,action,body);
   if(!options.keepModal)state.modal=null;
   rerender();if(state.page==='reportes')refreshReport();notify(options.message||'Cambios guardados correctamente.');
- }catch(e){notify(e.message,'error')}
+  return true;
+ }catch(e){
+  if(e.issues)showFieldErrors(document.querySelector('.modal-backdrop form[data-form]'),e.issues);
+  notify(e.message,'error');
+  return false;
+ }
 }
 async function handleAction(a,id){
  if(a.startsWith('page-')){navigate(a.slice(5));return}
@@ -264,17 +294,17 @@ function formNumbers(body,fields){for(const f of fields)if(body[f]!==undefined&&
 async function handleForm(form){
  const kind=form.dataset.form;const data=Object.fromEntries(new FormData(form).entries());
  if(kind==='roster-add'){
-  const team=Number(state.modal?.id);formNumbers(data,['ci_jugador','numero_camiseta']);await commit('', 'roster-add',{id_equipo:team,...data},{keepModal:true});state.modal={kind:'roster',id:team};rerenderModalOrFull();return;
+  const team=Number(state.modal?.id);formNumbers(data,['ci_jugador','numero_camiseta']);if(await commit('', 'roster-add',{id_equipo:team,...data},{keepModal:true})){state.modal={kind:'roster',id:team};rerenderModalOrFull();}return;
  }
  if(kind==='planilla'){
   const id=Number(state.modal.id);const participantes=[...form.querySelectorAll('input[name=participant]:checked')].map(i=>{const [ci_jugador,id_equipo]=i.value.split('|').map(Number);return {ci_jugador,id_equipo}});
-  await commit('','planilla-save',{id_partido:id,participantes},{keepModal:true});state.modal={kind:'planilla',id};rerenderModalOrFull();return;
+  if(await commit('','planilla-save',{id_partido:id,participantes},{keepModal:true})){state.modal={kind:'planilla',id};rerenderModalOrFull();}return;
  }
  if(kind==='goal'||kind==='card'){
   const id=Number(state.modal.id);const editing=Boolean(state.modal.extra);formNumbers(data,['ci_jugador','minuto']);const action=kind==='goal'?(editing?'goal-update':'goal-create'):(editing?'card-update':'card-create');if(kind==='goal')data.autogol=data.autogol==='true';
-  const current={...data,id_partido:id,...(editing?{[kind==='goal'?'id_gol':'id_tarjeta']:Number(state.modal.extra)}:{})};await commit('',action,current,{keepModal:true});state.modal={kind:'planilla',id};rerenderModalOrFull();return;
+  const current={...data,id_partido:id,...(editing?{[kind==='goal'?'id_gol':'id_tarjeta']:Number(state.modal.extra)}:{})};if(await commit('',action,current,{keepModal:true})){state.modal={kind:'planilla',id};rerenderModalOrFull();}return;
  }
- if(kind==='jersey'){const team=Number(state.modal.id),ci=Number(state.modal.extra);formNumbers(data,['numero_camiseta']);await commit('','roster-update',{id_equipo:team,ci_jugador:ci,...data},{keepModal:true});state.modal={kind:'roster',id:team};rerenderModalOrFull();return;}
+ if(kind==='jersey'){const team=Number(state.modal.id),ci=Number(state.modal.extra);formNumbers(data,['numero_camiseta']);if(await commit('','roster-update',{id_equipo:team,ci_jugador:ci,...data},{keepModal:true})){state.modal={kind:'roster',id:team};rerenderModalOrFull();}return;}
  const id=state.modal?.id;const editing=id!==''&&id!==null&&id!==undefined;let current={};
  const keys={jugador:'ci',equipo:'id_equipo',partido:'id_partido',torneo:'id_torneo',complejo:'id_complejo',cancha:'nombre_cancha',sancion_jugador:'id_sancion'};
  if(editing&&kind==='cancha'){
@@ -309,7 +339,22 @@ app.addEventListener('submit',async e=>{
  const submit=form.querySelector('[type=submit]');if(submit)submit.disabled=true;
  try{await handleForm(form)}catch(err){notify(err.message,'error')}finally{if(submit?.isConnected)submit.disabled=false}
 });
-app.addEventListener('input',e=>{if(e.target.id==='global-search'){state.search=e.target.value;rerenderContent()}});
+app.addEventListener('input',e=>{
+ if(e.target.id==='global-search'){state.search=e.target.value;rerenderContent();return;}
+ if(e.target.closest('.modal-backdrop form[data-form]')){
+  const form=e.target.closest('form');
+  e.target.removeAttribute('aria-invalid');
+  e.target.closest('.form-field')?.querySelector('.field-error')?.remove();
+  form.querySelector('.validation-summary')?.remove();
+ }
+});
+app.addEventListener('change',e=>{
+ if(e.target.closest('.modal-backdrop form[data-form]')){
+  e.target.removeAttribute('aria-invalid');
+  e.target.closest('.form-field')?.querySelector('.field-error')?.remove();
+  e.target.closest('form')?.querySelector('.validation-summary')?.remove();
+ }
+});
 app.addEventListener('change',e=>{if(e.target.id==='tournament-picker'){state.tournament=Number(e.target.value);state.search='';rerender();if(state.page==='reportes')refreshReport()}});
 window.addEventListener('hashchange',()=>{const page=window.location.hash.slice(1);if(titles[page]&&state.page!==page)navigate(page)});
 

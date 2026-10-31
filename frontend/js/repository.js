@@ -1,6 +1,7 @@
 import {API_BASE_URL, DEMO_STORAGE_KEY,MODE_STORAGE_KEY,TOKEN_STORAGE_KEY,USER_STORAGE_KEY} from './config.js';
 import {nextId} from './utils.js';
 import {generateReport,goalResult,isSuspended,sanctionsFor} from './reports.js';
+import {assertValid} from './validation.js';
 
 export const isDemo = () => localStorage.getItem(MODE_STORAGE_KEY)!=='api';
 export const setMode = (mode) => {localStorage.setItem(MODE_STORAGE_KEY,mode==='api'?'api':'demo');sessionStorage.removeItem(TOKEN_STORAGE_KEY);sessionStorage.removeItem(USER_STORAGE_KEY)};
@@ -29,7 +30,7 @@ export async function loadData(){
  if(!isDemo()){
   const data=await request('/bootstrap');
   const keys=['facultad','torneo','jugador','equipo','equipo_jugador_torneo','complejo','cancha','turno','partido','planilla_partido','gol','tarjeta','sancion_jugador'];
-  for(const k of keys)if(!Array.isArray(data?.[k]))fail(`El backend no devolvió el arreglo requerido «${k}». Revisá docs/API_CONTRACT.md.`);
+  for(const k of keys)if(!Array.isArray(data?.[k]))fail(`El backend no devolvió el arreglo requerido «${k}». Consultá el contrato de integración acordado con el backend.`);
   return data;
  }
  const raw=localStorage.getItem(DEMO_STORAGE_KEY);
@@ -43,6 +44,7 @@ export async function loadReport(slug,tournament,db){
  return Array.isArray(data)?data:(Array.isArray(data?.items)?data.items:fail('El reporte debe devolver un arreglo JSON o { items: [...] }.'));
 }
 export async function mutate(db,kind,action,payload={}){
+ assertValid(db,kind,action,payload);
  if(!isDemo()){
   const endpoint={jugador:'jugadores',equipo:'equipos',torneo:'torneos',complejo:'complejos',cancha:'canchas',partido:'partidos',sancion_jugador:'sanciones'};
   const method=action==='create'?'POST':(['update','goal-update','card-update','roster-update'].includes(action)?'PATCH':action==='remove'?'DELETE':'POST');
