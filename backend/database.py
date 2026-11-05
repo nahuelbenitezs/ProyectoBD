@@ -28,9 +28,16 @@ def _settings(role):
 
 @contextmanager
 def connection(role='administrador'):
+    """Cada request abre su conexión; si algo falla se hace ROLLBACK explícito."""
     db = mysql.connector.connect(**_settings(role))
     try:
         yield db
+    except Exception:
+        try:
+            db.rollback()
+        except mysql.connector.Error:
+            pass
+        raise
     finally:
         db.close()
 

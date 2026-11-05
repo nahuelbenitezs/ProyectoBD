@@ -1,0 +1,2085 @@
+openapi: 3.0.3
+info:
+  title: Torneo Interfacultades de Fútbol 5 — API REST
+  version: 1.0.0
+  description: |
+    API del obligatorio de Base de Datos 1 (UCU, 2.º semestre 2026). Flask + MySQL, sin ORM.
+
+    **Cómo probar en Postman**
+    1. Importar este archivo (*Import → File*). Se crea una colección con una carpeta por recurso.
+    2. Ejecutar **Sesión → Iniciar sesión** con un usuario de prueba y copiar el `token` de la respuesta.
+    3. En la colección, pestaña *Variables*, **agregar** la variable `bearerToken` con el token como valor
+       y guardar. Todas las requests usan *Bearer Token* con `{{bearerToken}}`.
+    4. Verificar que la variable `baseUrl` sea `http://localhost:5000/api`.
+    5. Para probar como planillero, repetir el login con ese usuario y reemplazar el valor de `bearerToken`.
+
+    **Usuarios de prueba** (datos de `torneo_ucu_creacion.sql`):
+    - Administrador: `admin@demo.ucu.edu.uy` / `AdminDemo2026!`
+    - Planillero: `planillero@demo.ucu.edu.uy` / `PlanillaDemo2026!`
+
+    **Permisos.** Todas las lecturas están permitidas a ambos roles. Las escrituras son solo del
+    administrador, salvo planillas, goles y tarjetas, que también puede registrar el planillero.
+    Cada rol usa su propia cuenta técnica de MySQL, por lo que los permisos se aplican también en la base.
+
+    **Errores.** Siempre `{"error": "mensaje"}`:
+    `400` validación · `401` sin sesión o vencida · `403` rol o cuenta MySQL sin permiso ·
+    `404` inexistente · `409` regla de negocio (mensaje del trigger), duplicado o referencia ·
+    `415` el cuerpo no es JSON · `503` MySQL no disponible.
+
+    **Reglas que dependen del momento actual.** Goles, tarjetas y planillas solo se aceptan en partidos
+    `jugado` dentro de las 48 horas posteriores a su turno. Los partidos de los datos de prueba (octubre
+    de 2026) ya vencieron, así que esas operaciones devuelven `409`. Para probarlas, crear un partido con
+    fecha de ayer y marcarlo como jugado (ver la carpeta *Partidos*).
+  contact:
+    name: Brian Rocha · Nahuel Benitez · Jorge Inzaurralde
+servers:
+  - url: http://localhost:5000/api
+    description: Local (python app.py o docker compose)
+security:
+  - bearerAuth: []
+tags:
+  - name: Sesión
+    description: Salud del servicio, inicio y cierre de sesión.
+  - name: Facultades
+  - name: Turnos
+    description: Turnos de una hora entre 18:00 y 23:00, y disponibilidad de canchas.
+  - name: Jugadores
+  - name: Torneos
+    description: Ediciones y estados (inscripción → en curso → finalizado).
+  - name: Equipos
+  - name: Planteles
+    description: Integrantes de cada equipo por edición (solo en etapa de inscripción).
+  - name: Complejos
+  - name: Canchas
+  - name: Partidos
+    description: Fixture, cambios de estado y resultado calculado desde los goles.
+  - name: Planillas
+    description: Jugadores que participaron de un partido (administrador y planillero).
+  - name: Goles
+  - name: Tarjetas
+  - name: Sanciones
+    description: Disciplinarias (manuales) y automáticas por tarjetas (id negativo, solo lectura).
+  - name: Reportes
+
+paths:
+  # ───────────────────────────── Sesión ─────────────────────────────
+  /health:
+    get:
+      tags: [Sesión]
+      summary: Estado del servicio y de la conexión a MySQL
+      operationId: health
+      security: []
+      responses:
+        '200':
+          description: API y base disponibles.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, example: ok}
+                  database: {type: string, example: connected}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+
+  /auth/login:
+    post:
+      tags: [Sesión]
+      summary: Iniciar sesión
+      description: Devuelve un token de sesión (vigencia por defecto 12 horas). Usarlo como `Bearer` en el resto de las rutas.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LoginRequest'}
+            examples:
+              administrador:
+                value: {correo: admin@demo.ucu.edu.uy, contrasena: AdminDemo2026!}
+              planillero:
+                value: {correo: planillero@demo.ucu.edu.uy, contrasena: PlanillaDemo2026!}
+      responses:
+        '200':
+          description: Sesión iniciada.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoginResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /auth/logout:
+    post:
+      tags: [Sesión]
+      summary: Cerrar sesión (revoca el token)
+      operationId: logout
+      responses:
+        '200':
+          description: Token revocado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: {type: boolean, example: true}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /auth/me:
+    get:
+      tags: [Sesión]
+      summary: Usuario y rol de la sesión actual
+      operationId: me
+      responses:
+        '200':
+          description: Usuario autenticado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Usuario'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  # ───────────────────────────── Facultades ─────────────────────────────
+  /facultades:
+    get:
+      tags: [Facultades]
+      summary: Listar facultades
+      operationId: listarFacultades
+      responses:
+        '200':
+          description: Facultades ordenadas por nombre.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Facultad'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Facultades]
+      summary: Crear facultad (administrador)
+      operationId: crearFacultad
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FacultadInput'}
+      responses:
+        '201':
+          description: Facultad creada.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Facultad'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /facultades/{id_facultad}:
+    parameters:
+      - $ref: '#/components/parameters/IdFacultad'
+    get:
+      tags: [Facultades]
+      summary: Detalle de una facultad
+      operationId: obtenerFacultad
+      responses:
+        '200':
+          description: Facultad.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Facultad'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Facultades]
+      summary: Renombrar facultad (administrador)
+      operationId: modificarFacultad
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FacultadInput'}
+      responses:
+        '200':
+          description: Facultad modificada.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Facultad'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Facultades]
+      summary: Eliminar facultad (administrador)
+      description: Falla con `409` si tiene jugadores o equipos asociados.
+      operationId: eliminarFacultad
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  # ───────────────────────────── Turnos ─────────────────────────────
+  /turnos:
+    get:
+      tags: [Turnos]
+      summary: Listar turnos
+      operationId: listarTurnos
+      responses:
+        '200':
+          description: Turnos ordenados por hora de inicio.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Turno'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Turnos]
+      summary: Crear turno (administrador)
+      description: Comienza en punto entre 18:00 y 22:00; `hora_fin` se calcula (+1 hora). Con los datos de prueba los cinco turnos ya existen, por lo que devuelve `409`.
+      operationId: crearTurno
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TurnoInput'}
+      responses:
+        '201':
+          description: Turno creado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Turno'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /turnos/{id_turno}:
+    parameters:
+      - $ref: '#/components/parameters/IdTurno'
+    get:
+      tags: [Turnos]
+      summary: Detalle de un turno
+      operationId: obtenerTurno
+      responses:
+        '200':
+          description: Turno.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Turno'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Turnos]
+      summary: Modificar horario de un turno (administrador)
+      operationId: modificarTurno
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TurnoInput'}
+      responses:
+        '200':
+          description: Turno modificado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Turno'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Turnos]
+      summary: Eliminar turno (administrador)
+      description: Falla con `409` si hay partidos en ese turno.
+      operationId: eliminarTurno
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /canchas/disponibles:
+    get:
+      tags: [Turnos]
+      summary: Canchas y turnos libres en un día
+      description: Los partidos postergados o cancelados liberan su reserva.
+      operationId: canchasDisponibles
+      parameters:
+        - name: dia
+          in: query
+          required: true
+          schema: {type: string, format: date, example: '2026-11-09'}
+        - name: id_complejo
+          in: query
+          schema: {type: integer, example: 1}
+      responses:
+        '200':
+          description: Combinaciones cancha + turno sin partido.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Disponibilidad'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+
+  # ───────────────────────────── Jugadores ─────────────────────────────
+  /jugadores:
+    get:
+      tags: [Jugadores]
+      summary: Listar jugadores
+      operationId: listarJugadores
+      parameters:
+        - name: id_facultad
+          in: query
+          schema: {type: integer, example: 1}
+        - name: tipo
+          in: query
+          schema: {$ref: '#/components/schemas/TipoJugador'}
+      responses:
+        '200':
+          description: Jugadores ordenados por cédula.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Jugador'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Jugadores]
+      summary: Registrar jugador (administrador)
+      operationId: crearJugador
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Jugador'}
+      responses:
+        '201':
+          description: Jugador creado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Jugador'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /jugadores/{ci}:
+    parameters:
+      - $ref: '#/components/parameters/Ci'
+    get:
+      tags: [Jugadores]
+      summary: Detalle de un jugador y sus equipos
+      operationId: obtenerJugador
+      responses:
+        '200':
+          description: Jugador con los equipos que integró en cada edición.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JugadorDetalle'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Jugadores]
+      summary: Modificar jugador (administrador)
+      description: Actualización parcial; la cédula no puede cambiar. Facultad y tipo solo cambian si el jugador no integra ningún plantel.
+      operationId: modificarJugador
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/JugadorPatch'}
+      responses:
+        '200':
+          description: Jugador modificado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Jugador'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Jugadores]
+      summary: Eliminar jugador (administrador)
+      description: Falla con `409` si el jugador tiene referencias (planteles, planillas, sanciones o es capitán).
+      operationId: eliminarJugador
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /jugadores/{ci}/suspension:
+    parameters:
+      - $ref: '#/components/parameters/Ci'
+    get:
+      tags: [Jugadores]
+      summary: ¿Está suspendido el jugador en una fecha?
+      description: Considera sanciones disciplinarias y automáticas (roja o tercera amarilla). Ejemplo con datos de prueba, `ci=50000103`, `id_torneo=1`, `numero_fecha=2` → suspendido por roja.
+      operationId: suspensionJugador
+      parameters:
+        - $ref: '#/components/parameters/IdTorneoQueryRequerido'
+        - name: numero_fecha
+          in: query
+          required: true
+          schema: {type: integer, example: 2}
+      responses:
+        '200':
+          description: Estado de suspensión.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Suspension'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+
+  # ───────────────────────────── Torneos ─────────────────────────────
+  /torneos:
+    get:
+      tags: [Torneos]
+      summary: Listar ediciones
+      operationId: listarTorneos
+      parameters:
+        - name: estado
+          in: query
+          schema: {$ref: '#/components/schemas/EstadoTorneo'}
+      responses:
+        '200':
+          description: Ediciones, de la más reciente a la más antigua.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Torneo'}
+    post:
+      tags: [Torneos]
+      summary: Crear edición (administrador)
+      description: Toda edición nueva comienza en `inscripción`. `anio` + `semestre` es único.
+      operationId: crearTorneo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TorneoInput'}
+      responses:
+        '201':
+          description: Edición creada.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Torneo'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /torneos/{id_torneo}:
+    parameters:
+      - $ref: '#/components/parameters/IdTorneo'
+    get:
+      tags: [Torneos]
+      summary: Detalle de una edición
+      operationId: obtenerTorneo
+      responses:
+        '200':
+          description: Edición.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Torneo'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Torneos]
+      summary: Modificar edición o avanzar su estado (administrador)
+      description: |
+        Los estados solo avanzan: `inscripción` → `en curso` → `finalizado`.
+        Para salir de inscripción, todos los equipos deben tener entre 5 y 10 jugadores y el capitán en el plantel.
+      operationId: modificarTorneo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TorneoPatch'}
+      responses:
+        '200':
+          description: Edición modificada.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Torneo'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Torneos]
+      summary: Eliminar edición (administrador)
+      description: Falla con `409` si tiene equipos, partidos o sanciones.
+      operationId: eliminarTorneo
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /torneos/{id_torneo}/equipos:
+    parameters:
+      - $ref: '#/components/parameters/IdTorneo'
+    get:
+      tags: [Torneos]
+      summary: Equipos de una edición
+      operationId: equiposDelTorneo
+      responses:
+        '200':
+          description: Equipos con su cantidad de jugadores.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Equipo'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /torneos/{id_torneo}/fechas:
+    parameters:
+      - $ref: '#/components/parameters/IdTorneo'
+    get:
+      tags: [Torneos]
+      summary: Fechas (jornadas) de una edición
+      operationId: fechasDelTorneo
+      responses:
+        '200':
+          description: Resumen de partidos por número de fecha.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Fecha'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  # ───────────────────────────── Equipos ─────────────────────────────
+  /equipos:
+    get:
+      tags: [Equipos]
+      summary: Listar equipos
+      operationId: listarEquipos
+      parameters:
+        - $ref: '#/components/parameters/IdTorneoQuery'
+        - name: id_facultad
+          in: query
+          schema: {type: integer, example: 1}
+      responses:
+        '200':
+          description: Equipos.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Equipo'}
+    post:
+      tags: [Equipos]
+      summary: Crear equipo (administrador)
+      description: |
+        Solo en ediciones en `inscripción`. El capitán debe ser de la facultad del equipo y se inscribe
+        automáticamente en el plantel (misma transacción) con `numero_camiseta_capitan` (por defecto 1).
+        Requiere una edición en inscripción: crearla antes con **Torneos → Crear edición**.
+      operationId: crearEquipo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EquipoInput'}
+      responses:
+        '201':
+          description: Equipo creado con su capitán en el plantel.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Equipo'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /equipos/{id_equipo}:
+    parameters:
+      - $ref: '#/components/parameters/IdEquipo'
+    get:
+      tags: [Equipos]
+      summary: Detalle de un equipo con su plantel
+      operationId: obtenerEquipo
+      responses:
+        '200':
+          description: Equipo y plantel.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EquipoDetalle'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Equipos]
+      summary: Modificar nombre o capitán (administrador)
+      description: No se puede cambiar la edición ni la facultad. El nuevo capitán debe integrar el plantel.
+      operationId: modificarEquipo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EquipoPatch'}
+      responses:
+        '200':
+          description: Equipo modificado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Equipo'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Equipos]
+      summary: Eliminar equipo (administrador)
+      description: Falla con `409` si el equipo tiene plantel o partidos.
+      operationId: eliminarEquipo
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  # ───────────────────────────── Planteles ─────────────────────────────
+  /equipos/{id_equipo}/plantel:
+    parameters:
+      - $ref: '#/components/parameters/IdEquipo'
+    get:
+      tags: [Planteles]
+      summary: Plantel de un equipo
+      operationId: listarPlantel
+      responses:
+        '200':
+          description: Integrantes ordenados por número de camiseta.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PlantelItem'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    post:
+      tags: [Planteles]
+      summary: Inscribir jugador en el plantel (administrador)
+      description: |
+        Solo en `inscripción`. Rechaza (409): jugador de otra facultad, más de 10 integrantes,
+        más de 2 docentes/funcionarios, jugador ya inscripto en otro equipo de la edición y camiseta repetida.
+      operationId: agregarAlPlantel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PlantelInput'}
+      responses:
+        '201':
+          description: Jugador inscripto.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlantelItem'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /equipos/{id_equipo}/plantel/{ci}:
+    parameters:
+      - $ref: '#/components/parameters/IdEquipo'
+      - $ref: '#/components/parameters/Ci'
+    patch:
+      tags: [Planteles]
+      summary: Cambiar número de camiseta (administrador)
+      operationId: modificarCamiseta
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CamisetaInput'}
+      responses:
+        '200':
+          description: Camiseta modificada.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlantelItem'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Planteles]
+      summary: Quitar jugador del plantel (administrador)
+      description: Solo en `inscripción`. No se puede quitar al capitán ni dejar con menos de 5 a un equipo con partidos.
+      operationId: quitarDelPlantel
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  # ───────────────────────────── Complejos ─────────────────────────────
+  /complejos:
+    get:
+      tags: [Complejos]
+      summary: Listar complejos deportivos
+      operationId: listarComplejos
+      responses:
+        '200':
+          description: Complejos.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Complejo'}
+    post:
+      tags: [Complejos]
+      summary: Crear complejo (administrador)
+      operationId: crearComplejo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ComplejoInput'}
+      responses:
+        '201':
+          description: Complejo creado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Complejo'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /complejos/{id_complejo}:
+    parameters:
+      - $ref: '#/components/parameters/IdComplejo'
+    get:
+      tags: [Complejos]
+      summary: Detalle de un complejo con sus canchas
+      operationId: obtenerComplejo
+      responses:
+        '200':
+          description: Complejo.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ComplejoDetalle'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Complejos]
+      summary: Modificar complejo (administrador)
+      operationId: modificarComplejo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ComplejoPatch'}
+      responses:
+        '200':
+          description: Complejo modificado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Complejo'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    delete:
+      tags: [Complejos]
+      summary: Eliminar complejo (administrador)
+      description: Falla con `409` si tiene canchas.
+      operationId: eliminarComplejo
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  # ───────────────────────────── Canchas ─────────────────────────────
+  /canchas:
+    get:
+      tags: [Canchas]
+      summary: Listar todas las canchas
+      operationId: listarCanchas
+      parameters:
+        - name: id_complejo
+          in: query
+          schema: {type: integer, example: 1}
+      responses:
+        '200':
+          description: Canchas.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Cancha'}
+
+  /complejos/{id_complejo}/canchas:
+    parameters:
+      - $ref: '#/components/parameters/IdComplejo'
+    get:
+      tags: [Canchas]
+      summary: Canchas de un complejo
+      operationId: canchasDelComplejo
+      responses:
+        '200':
+          description: Canchas.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Cancha'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    post:
+      tags: [Canchas]
+      summary: Crear cancha en un complejo (administrador)
+      operationId: crearCancha
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CanchaInput'}
+      responses:
+        '201':
+          description: Cancha creada.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Cancha'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /complejos/{id_complejo}/canchas/{nombre_cancha}:
+    parameters:
+      - $ref: '#/components/parameters/IdComplejo'
+      - $ref: '#/components/parameters/NombreCancha'
+    get:
+      tags: [Canchas]
+      summary: Detalle de una cancha
+      operationId: obtenerCancha
+      responses:
+        '200':
+          description: Cancha.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Cancha'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Canchas]
+      summary: Modificar cancha (administrador)
+      description: Puede renombrarse solo si no tiene partidos (`409` en caso contrario).
+      operationId: modificarCancha
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CanchaPatch'}
+      responses:
+        '200':
+          description: Cancha modificada.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Cancha'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Canchas]
+      summary: Eliminar cancha (administrador)
+      description: Falla con `409` si tiene partidos.
+      operationId: eliminarCancha
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  # ───────────────────────────── Partidos ─────────────────────────────
+  /partidos:
+    get:
+      tags: [Partidos]
+      summary: Listar partidos (fixture)
+      operationId: listarPartidos
+      parameters:
+        - $ref: '#/components/parameters/IdTorneoQuery'
+        - name: numero_fecha
+          in: query
+          schema: {type: integer, example: 1}
+        - name: id_equipo
+          in: query
+          description: Partidos donde el equipo es local o visitante.
+          schema: {type: integer, example: 1}
+        - name: estado
+          in: query
+          schema: {$ref: '#/components/schemas/EstadoPartido'}
+      responses:
+        '200':
+          description: Partidos con nombres de equipos, horario, complejo y resultado (si fue jugado).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Partido'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+    post:
+      tags: [Partidos]
+      summary: Programar partido (administrador)
+      description: |
+        Rechaza (400/409): equipo contra sí mismo, equipos de otra edición o con menos de 5 jugadores,
+        rival repetido (salvo cancelado), dos partidos del mismo equipo en la misma fecha, cancha ocupada en
+        ese día y turno, día fuera del torneo, edición finalizada y `jugado` antes de que termine el turno.
+
+        Ejemplo válido con datos de prueba: Tigres (2) vs Pumas (4) todavía no se enfrentaron.
+      operationId: crearPartido
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PartidoInput'}
+      responses:
+        '201':
+          description: Partido programado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Partido'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /partidos/{id_partido}:
+    parameters:
+      - $ref: '#/components/parameters/IdPartido'
+    get:
+      tags: [Partidos]
+      summary: Detalle de un partido
+      operationId: obtenerPartido
+      responses:
+        '200':
+          description: Partido.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Partido'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Partidos]
+      summary: Reprogramar partido (administrador)
+      description: Actualización parcial con las mismas reglas que al programar. Un partido `jugado` no se modifica (`409`).
+      operationId: modificarPartido
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PartidoPatch'}
+      responses:
+        '200':
+          description: Partido modificado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Partido'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Partidos]
+      summary: Eliminar partido (administrador)
+      description: Un partido `jugado` no puede eliminarse (`409`).
+      operationId: eliminarPartido
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /partidos/{id_partido}/estado:
+    parameters:
+      - $ref: '#/components/parameters/IdPartido'
+    patch:
+      tags: [Partidos]
+      summary: Postergar, cancelar, reprogramar o marcar jugado (administrador)
+      description: '`jugado` solo después del día y turno del partido. Un partido jugado no cambia de estado.'
+      operationId: cambiarEstadoPartido
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EstadoPartidoInput'}
+      responses:
+        '200':
+          description: Estado actualizado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Partido'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /partidos/{id_partido}/resultado:
+    parameters:
+      - $ref: '#/components/parameters/IdPartido'
+    get:
+      tags: [Partidos]
+      summary: Resultado calculado desde los goles (incluye autogoles)
+      description: Ejemplo con datos de prueba, partido 7 → 1 a 1 (gol y autogol de Pumas). `409` si el partido no se jugó.
+      operationId: resultadoPartido
+      responses:
+        '200':
+          description: Marcador y detalle de goles.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Resultado'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  # ───────────────────────────── Planillas ─────────────────────────────
+  /partidos/{id_partido}/habilitados:
+    parameters:
+      - $ref: '#/components/parameters/IdPartido'
+    get:
+      tags: [Planillas]
+      summary: Planteles de ambos equipos con suspensiones
+      description: Indica para cada integrante si está suspendido para la fecha del partido y si ya figura en la planilla.
+      operationId: habilitadosPartido
+      responses:
+        '200':
+          description: Integrantes de local y visitante.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Habilitado'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /partidos/{id_partido}/planilla:
+    parameters:
+      - $ref: '#/components/parameters/IdPartido'
+    get:
+      tags: [Planillas]
+      summary: Planilla de un partido
+      operationId: obtenerPlanilla
+      responses:
+        '200':
+          description: Participantes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PlanillaItem'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    put:
+      tags: [Planillas]
+      summary: Reemplazar la planilla completa (administrador o planillero)
+      description: |
+        Una sola transacción: si algún participante es rechazado (fuera del plantel, suspendido, partido
+        no jugado o fuera de las 48 horas) no se guarda nada. No se puede quitar a quien tiene goles o tarjetas.
+      operationId: reemplazarPlanilla
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PlanillaInput'}
+      responses:
+        '200':
+          description: Planilla guardada.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PlanillaItem'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    post:
+      tags: [Planillas]
+      summary: Agregar un participante (administrador o planillero)
+      operationId: agregarParticipante
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Participante'}
+      responses:
+        '201':
+          description: Participante agregado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanillaItem'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /partidos/{id_partido}/planilla/{ci}:
+    parameters:
+      - $ref: '#/components/parameters/IdPartido'
+      - $ref: '#/components/parameters/Ci'
+    delete:
+      tags: [Planillas]
+      summary: Quitar un participante (administrador o planillero)
+      operationId: quitarParticipante
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /partidos/{id_partido}/eventos:
+    parameters:
+      - $ref: '#/components/parameters/IdPartido'
+    get:
+      tags: [Planillas]
+      summary: Partido, planilla, goles y tarjetas en una sola llamada
+      operationId: eventosPartido
+      responses:
+        '200':
+          description: Todos los datos cargados del partido.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Eventos'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  # ───────────────────────────── Goles ─────────────────────────────
+  /partidos/{id_partido}/goles:
+    parameters:
+      - $ref: '#/components/parameters/IdPartido'
+    get:
+      tags: [Goles]
+      summary: Goles de un partido
+      operationId: listarGoles
+      responses:
+        '200':
+          description: Goles ordenados por minuto.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Gol'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    post:
+      tags: [Goles]
+      summary: Registrar gol (administrador o planillero)
+      description: El jugador debe figurar en la planilla. Un autogol suma al rival del equipo del jugador.
+      operationId: crearGol
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GolInput'}
+      responses:
+        '201':
+          description: Gol registrado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GolCreado'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /partidos/{id_partido}/goles/{id_gol}:
+    parameters:
+      - $ref: '#/components/parameters/IdPartido'
+      - name: id_gol
+        in: path
+        required: true
+        schema: {type: integer, example: 1}
+    patch:
+      tags: [Goles]
+      summary: Corregir gol (administrador o planillero)
+      operationId: modificarGol
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GolPatch'}
+      responses:
+        '200':
+          description: Gol corregido.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GolCreado'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Goles]
+      summary: Eliminar gol (administrador o planillero)
+      operationId: eliminarGol
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  # ───────────────────────────── Tarjetas ─────────────────────────────
+  /partidos/{id_partido}/tarjetas:
+    parameters:
+      - $ref: '#/components/parameters/IdPartido'
+    get:
+      tags: [Tarjetas]
+      summary: Tarjetas de un partido
+      operationId: listarTarjetas
+      responses:
+        '200':
+          description: Tarjetas ordenadas por minuto.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Tarjeta'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    post:
+      tags: [Tarjetas]
+      summary: Registrar tarjeta (administrador o planillero)
+      description: |
+        Una roja, o cada tercera amarilla de la edición, genera automáticamente una fecha de suspensión
+        (visible en **Sanciones**). Se rechaza si esa suspensión invalidaría una planilla ya cargada.
+      operationId: crearTarjeta
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TarjetaInput'}
+      responses:
+        '201':
+          description: Tarjeta registrada.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TarjetaCreada'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /partidos/{id_partido}/tarjetas/{id_tarjeta}:
+    parameters:
+      - $ref: '#/components/parameters/IdPartido'
+      - name: id_tarjeta
+        in: path
+        required: true
+        schema: {type: integer, example: 1}
+    patch:
+      tags: [Tarjetas]
+      summary: Corregir tarjeta (administrador o planillero)
+      operationId: modificarTarjeta
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TarjetaPatch'}
+      responses:
+        '200':
+          description: Tarjeta corregida.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TarjetaCreada'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Tarjetas]
+      summary: Eliminar tarjeta (administrador o planillero)
+      operationId: eliminarTarjeta
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  # ───────────────────────────── Sanciones ─────────────────────────────
+  /sanciones:
+    get:
+      tags: [Sanciones]
+      summary: Listar sanciones (manuales y automáticas)
+      operationId: listarSanciones
+      parameters:
+        - $ref: '#/components/parameters/IdTorneoQuery'
+        - name: ci_jugador
+          in: query
+          schema: {type: integer, example: 50000103}
+        - name: id_equipo
+          in: query
+          schema: {type: integer, example: 1}
+        - name: motivo
+          in: query
+          schema: {$ref: '#/components/schemas/MotivoSancion'}
+        - name: origen
+          in: query
+          schema: {type: string, enum: [manual, automatica]}
+      responses:
+        '200':
+          description: Sanciones.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Sancion'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+    post:
+      tags: [Sanciones]
+      summary: Aplicar sanción disciplinaria (administrador)
+      description: |
+        Siempre `motivo = disciplinaria`, `origen = manual`. El jugador debe integrar un plantel de la edición
+        y no puede tener planillas en las fechas que abarca la sanción.
+      operationId: crearSancion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SancionInput'}
+      responses:
+        '201':
+          description: Sanción creada.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Sancion'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /sanciones/{id_sancion}:
+    parameters:
+      - name: id_sancion
+        in: path
+        required: true
+        description: Positivo = disciplinaria. Negativo = automática (id de la tarjeta que la originó, con signo menos).
+        schema: {type: integer, example: 1}
+    get:
+      tags: [Sanciones]
+      summary: Detalle de una sanción
+      operationId: obtenerSancion
+      responses:
+        '200':
+          description: Sanción.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Sancion'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Sanciones]
+      summary: Modificar sanción disciplinaria (administrador)
+      description: Las automáticas (id negativo) devuelven `409`; se corrigen modificando la tarjeta.
+      operationId: modificarSancion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SancionPatch'}
+      responses:
+        '200':
+          description: Sanción modificada.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Sancion'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Sanciones]
+      summary: Eliminar sanción disciplinaria (administrador)
+      operationId: eliminarSancion
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  # ───────────────────────────── Reportes ─────────────────────────────
+  /reportes:
+    get:
+      tags: [Reportes]
+      summary: Reportes disponibles
+      operationId: listarReportes
+      responses:
+        '200':
+          description: Identificadores (slug) de los 12 reportes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/SlugReporte'}
+
+  /reportes/{slug}:
+    get:
+      tags: [Reportes]
+      summary: Ejecutar un reporte de una edición
+      description: |
+        | slug | Reporte |
+        | --- | --- |
+        | `posiciones` | 1. Tabla de posiciones (PJ, PG, PE, PP, GF, GC, DG, puntos) |
+        | `goleadores` | 2. Diez máximos goleadores (sin autogoles) |
+        | `fair-play` | 3. Fair play por equipo (amarilla 1, roja 3) |
+        | `promedio-goles` | 4. Promedio de goles por fecha y por edición |
+        | `uso-espacios` | 5. Canchas y turnos más utilizados |
+        | `jugadores-facultad` | 6. Jugadores por facultad y tipo (padrón global, ignora la edición) |
+        | `sin-participacion` | 7. Inscriptos que nunca figuraron en una planilla |
+        | `sanciones` | 8. Sanciones por equipo y motivo |
+        | `estados` | 9. Porcentaje de partidos jugados, postergados, cancelados y programados |
+        | `local-visitante` | 10. Rendimiento como local y como visitante |
+        | `disciplina` | 11. Disciplina individual (tarjetas y sanciones) |
+        | `goles-tramos` | 12. Goles por tramo del partido |
+      operationId: ejecutarReporte
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: {$ref: '#/components/schemas/SlugReporte'}
+        - $ref: '#/components/parameters/IdTorneoQueryRequerido'
+      responses:
+        '200':
+          description: Filas del reporte; las columnas dependen de cada vista SQL.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+              examples:
+                posiciones:
+                  value:
+                    - {id_torneo: 1, id_equipo: 1, equipo: Halcones, partidos_jugados: 4, ganados: 2, empatados: 2,
+                       perdidos: 0, goles_favor: 6, goles_contra: 3, diferencia_goles: 3, puntos: 8}
+                estados:
+                  value:
+                    - {estado: jugado, cantidad: 10, porcentaje: 76.92}
+                    - {estado: postergado, cantidad: 1, porcentaje: 7.69}
+                    - {estado: cancelado, cantidad: 1, porcentaje: 7.69}
+                    - {estado: programado, cantidad: 1, porcentaje: 7.69}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /bootstrap:
+    get:
+      tags: [Reportes]
+      summary: Carga inicial del frontend (todas las tablas, sin credenciales)
+      operationId: bootstrap
+      responses:
+        '200':
+          description: Un arreglo por tabla. En `sancion_jugador` solo vienen las sanciones manuales.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  facultad: {type: array, items: {type: object}}
+                  torneo: {type: array, items: {type: object}}
+                  jugador: {type: array, items: {type: object}}
+                  equipo: {type: array, items: {type: object}}
+                  equipo_jugador_torneo: {type: array, items: {type: object}}
+                  complejo: {type: array, items: {type: object}}
+                  cancha: {type: array, items: {type: object}}
+                  turno: {type: array, items: {type: object}}
+                  partido: {type: array, items: {type: object}}
+                  planilla_partido: {type: array, items: {type: object}}
+                  gol: {type: array, items: {type: object}}
+                  tarjeta: {type: array, items: {type: object}}
+                  sancion_jugador: {type: array, items: {type: object}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Token devuelto por `POST /auth/login`.
+
+  parameters:
+    Ci:
+      name: ci
+      in: path
+      required: true
+      description: Cédula del jugador.
+      schema: {type: integer, example: 50000101}
+    IdFacultad:
+      name: id_facultad
+      in: path
+      required: true
+      schema: {type: integer, example: 1}
+    IdTurno:
+      name: id_turno
+      in: path
+      required: true
+      schema: {type: integer, example: 1}
+    IdTorneo:
+      name: id_torneo
+      in: path
+      required: true
+      schema: {type: integer, example: 1}
+    IdEquipo:
+      name: id_equipo
+      in: path
+      required: true
+      schema: {type: integer, example: 1}
+    IdComplejo:
+      name: id_complejo
+      in: path
+      required: true
+      schema: {type: integer, example: 1}
+    NombreCancha:
+      name: nombre_cancha
+      in: path
+      required: true
+      description: Nombre de la cancha (codificar espacios como `%20`).
+      schema: {type: string, example: Cancha A}
+    IdPartido:
+      name: id_partido
+      in: path
+      required: true
+      schema: {type: integer, example: 7}
+    IdTorneoQuery:
+      name: id_torneo
+      in: query
+      description: Filtrar por edición.
+      schema: {type: integer, example: 1}
+    IdTorneoQueryRequerido:
+      name: id_torneo
+      in: query
+      required: true
+      description: Edición.
+      schema: {type: integer, example: 1}
+
+  responses:
+    NoContent:
+      description: Operación realizada, sin contenido.
+    BadRequest:
+      description: Datos inválidos.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: El minuto debe ser un entero entre 0 y 60.}
+    Unauthorized:
+      description: Sin sesión, token inválido o vencido.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: Tenés que iniciar sesión.}
+    Forbidden:
+      description: El rol (o su cuenta MySQL) no tiene permiso.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: No tenés permisos para esta operación.}
+    NotFound:
+      description: Recurso inexistente.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: Partido no encontrado.}
+    Conflict:
+      description: Regla de negocio (mensaje del trigger), valor duplicado o registro referenciado.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          examples:
+            regla:
+              value: {error: El jugador esta suspendido para esta fecha}
+            plazo:
+              value: {error: Vencio el plazo de 48 horas para corregir la planilla}
+            duplicado:
+              value: {error: La cancha ya tiene un partido ese día y turno.}
+    ServiceUnavailable:
+      description: MySQL no disponible o mal configurado.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: {type: string}
+      required: [error]
+
+    # Enumeraciones
+    TipoJugador:
+      type: string
+      enum: [grado, posgrado, docente, funcionario]
+    EstadoTorneo:
+      type: string
+      enum: [inscripción, en curso, finalizado]
+    EstadoPartido:
+      type: string
+      enum: [programado, jugado, postergado, cancelado]
+    MotivoSancion:
+      type: string
+      enum: [roja, acumulación de amarillas, disciplinaria]
+    SlugReporte:
+      type: string
+      enum: [posiciones, goleadores, fair-play, promedio-goles, uso-espacios, jugadores-facultad,
+             sin-participacion, sanciones, estados, local-visitante, disciplina, goles-tramos]
+
+    # Sesión
+    LoginRequest:
+      type: object
+      required: [correo, contrasena]
+      properties:
+        correo: {type: string, format: email, example: admin@demo.ucu.edu.uy}
+        contrasena: {type: string, example: AdminDemo2026!}
+    Usuario:
+      type: object
+      properties:
+        correo: {type: string, example: admin@demo.ucu.edu.uy}
+        rol: {type: string, enum: [administrador, planillero], example: administrador}
+    LoginResponse:
+      type: object
+      properties:
+        token: {type: string, example: 3q2-7Vb0h8bJ5yQ0r8m5a1qJcWZ2sY8g4bP0x9kLwQk}
+        user: {$ref: '#/components/schemas/Usuario'}
+
+    # Facultades y turnos
+    FacultadInput:
+      type: object
+      required: [nombre]
+      properties:
+        nombre: {type: string, maxLength: 100, example: Arquitectura}
+    Facultad:
+      type: object
+      properties:
+        id_facultad: {type: integer, example: 1}
+        nombre: {type: string, example: Ingenieria}
+    TurnoInput:
+      type: object
+      required: [hora_inicio]
+      properties:
+        hora_inicio: {type: string, example: '18:00', description: 'HH:MM, en punto, de 18:00 a 22:00.'}
+        hora_fin: {type: string, example: '19:00', description: Opcional; debe ser hora_inicio + 1 hora.}
+    Turno:
+      type: object
+      properties:
+        id_turno: {type: integer, example: 1}
+        hora_inicio: {type: string, example: '18:00:00'}
+        hora_fin: {type: string, example: '19:00:00'}
+    Disponibilidad:
+      type: object
+      properties:
+        id_complejo: {type: integer, example: 1}
+        complejo: {type: string, example: Complejo Norte}
+        nombre_cancha: {type: string, example: Cancha A}
+        superficie: {type: string, example: sintético}
+        techada: {type: integer, example: 0}
+        id_turno: {type: integer, example: 2}
+        hora_inicio: {type: string, example: '19:00:00'}
+        hora_fin: {type: string, example: '20:00:00'}
+
+    # Jugadores
+    Jugador:
+      type: object
+      required: [ci, nombre, apellido, email, fecha_nacimiento, id_facultad, tipo]
+      properties:
+        ci: {type: integer, description: 6 a 10 dígitos, example: 51234567}
+        nombre: {type: string, maxLength: 100, example: Ana}
+        apellido: {type: string, maxLength: 100, example: Suárez}
+        email: {type: string, format: email, example: asuarez@example.edu.uy}
+        fecha_nacimiento: {type: string, format: date, example: '2001-05-04'}
+        id_facultad: {type: integer, example: 1}
+        tipo: {$ref: '#/components/schemas/TipoJugador'}
+    JugadorPatch:
+      type: object
+      description: Cualquier subconjunto de campos del jugador, salvo la cédula.
+      properties:
+        nombre: {type: string, example: Ana María}
+        apellido: {type: string}
+        email: {type: string, format: email}
+        fecha_nacimiento: {type: string, format: date}
+        id_facultad: {type: integer}
+        tipo: {$ref: '#/components/schemas/TipoJugador'}
+    JugadorDetalle:
+      allOf:
+        - $ref: '#/components/schemas/Jugador'
+        - type: object
+          properties:
+            equipos:
+              type: array
+              items:
+                type: object
+                properties:
+                  id_torneo: {type: integer, example: 1}
+                  id_equipo: {type: integer, example: 1}
+                  equipo: {type: string, example: Halcones}
+                  numero_camiseta: {type: integer, example: 1}
+    Suspension:
+      type: object
+      properties:
+        ci_jugador: {type: integer, example: 50000103}
+        id_torneo: {type: integer, example: 1}
+        numero_fecha: {type: integer, example: 2}
+        suspendido: {type: boolean, example: true}
+        sanciones:
+          type: array
+          items:
+            type: object
+            properties:
+              id_sancion: {type: integer, example: -1}
+              motivo: {$ref: '#/components/schemas/MotivoSancion'}
+              numero_fecha_inicio: {type: integer, example: 2}
+              cantidad_fechas: {type: integer, example: 1}
+              origen: {type: string, example: automatica}
+
+    # Torneos
+    TorneoInput:
+      type: object
+      required: [nombre, anio, semestre, fecha_inicio, fecha_fin]
+      properties:
+        nombre: {type: string, maxLength: 150, example: Interfacultades Futbol 5 - 2027 S1}
+        anio: {type: integer, minimum: 2000, maximum: 2100, example: 2027}
+        semestre: {type: integer, enum: [1, 2], example: 1}
+        fecha_inicio: {type: string, format: date, example: '2027-03-01'}
+        fecha_fin: {type: string, format: date, example: '2027-06-30'}
+        estado:
+          allOf: [{$ref: '#/components/schemas/EstadoTorneo'}]
+          description: Opcional; al crear solo se admite `inscripción`.
+    TorneoPatch:
+      type: object
+      description: Cualquier subconjunto de campos de la edición.
+      properties:
+        nombre: {type: string}
+        anio: {type: integer}
+        semestre: {type: integer, enum: [1, 2]}
+        fecha_inicio: {type: string, format: date}
+        fecha_fin: {type: string, format: date}
+        estado:
+          allOf: [{$ref: '#/components/schemas/EstadoTorneo'}]
+          example: en curso
+    Torneo:
+      type: object
+      properties:
+        id_torneo: {type: integer, example: 1}
+        nombre: {type: string, example: Interfacultades Futbol 5 - 2026 S2}
+        anio: {type: integer, example: 2026}
+        semestre: {type: integer, example: 2}
+        fecha_inicio: {type: string, format: date, example: '2026-10-01'}
+        fecha_fin: {type: string, format: date, example: '2026-11-30'}
+        estado: {$ref: '#/components/schemas/EstadoTorneo'}
+    Fecha:
+      type: object
+      properties:
+        numero_fecha: {type: integer, example: 1}
+        primer_dia: {type: string, format: date, example: '2026-10-05'}
+        ultimo_dia: {type: string, format: date, example: '2026-10-05'}
+        partidos: {type: integer, example: 3}
+        jugados: {type: integer, example: 3}
+        programados: {type: integer, example: 0}
+        postergados: {type: integer, example: 0}
+        cancelados: {type: integer, example: 0}
+
+    # Equipos y planteles
+    EquipoInput:
+      type: object
+      required: [nombre, id_torneo, id_facultad, ci_capitan]
+      properties:
+        nombre: {type: string, maxLength: 100, example: Cóndores}
+        id_torneo: {type: integer, description: Edición en inscripción., example: 2}
+        id_facultad: {type: integer, example: 1}
+        ci_capitan: {type: integer, description: Jugador de la misma facultad., example: 50000101}
+        numero_camiseta_capitan: {type: integer, minimum: 1, maximum: 99, default: 1, example: 10}
+    EquipoPatch:
+      type: object
+      properties:
+        nombre: {type: string, example: Halcones FC}
+        ci_capitan: {type: integer, description: Debe integrar el plantel., example: 50000102}
+    Equipo:
+      type: object
+      properties:
+        id_equipo: {type: integer, example: 1}
+        nombre: {type: string, example: Halcones}
+        id_torneo: {type: integer, example: 1}
+        id_facultad: {type: integer, example: 1}
+        facultad: {type: string, example: Ingenieria}
+        ci_capitan: {type: integer, example: 50000101}
+        cantidad_jugadores: {type: integer, example: 7}
+    EquipoDetalle:
+      allOf:
+        - $ref: '#/components/schemas/Equipo'
+        - type: object
+          properties:
+            plantel:
+              type: array
+              items: {$ref: '#/components/schemas/PlantelItem'}
+    PlantelInput:
+      type: object
+      required: [ci_jugador, numero_camiseta]
+      properties:
+        ci_jugador: {type: integer, example: 50000102}
+        numero_camiseta: {type: integer, minimum: 1, maximum: 99, example: 8}
+    CamisetaInput:
+      type: object
+      required: [numero_camiseta]
+      properties:
+        numero_camiseta: {type: integer, minimum: 1, maximum: 99, example: 23}
+    PlantelItem:
+      type: object
+      properties:
+        id_equipo: {type: integer, example: 1}
+        id_torneo: {type: integer, example: 1}
+        ci_jugador: {type: integer, example: 50000101}
+        nombre: {type: string, example: Sofia}
+        apellido: {type: string, example: Pereira}
+        tipo: {$ref: '#/components/schemas/TipoJugador'}
+        numero_camiseta: {type: integer, example: 1}
+
+    # Complejos y canchas
+    ComplejoInput:
+      type: object
+      required: [nombre, direccion, departamento]
+      properties:
+        nombre: {type: string, maxLength: 100, example: Complejo Este}
+        direccion: {type: string, maxLength: 150, example: Av. Italia 4500}
+        departamento: {type: string, maxLength: 100, example: Montevideo}
+    ComplejoPatch:
+      type: object
+      properties:
+        nombre: {type: string}
+        direccion: {type: string, example: Av. Italia 4600}
+        departamento: {type: string}
+    Complejo:
+      type: object
+      properties:
+        id_complejo: {type: integer, example: 1}
+        nombre: {type: string, example: Complejo Norte}
+        direccion: {type: string, example: Av. Demo 1200}
+        departamento: {type: string, example: Montevideo}
+    ComplejoDetalle:
+      allOf:
+        - $ref: '#/components/schemas/Complejo'
+        - type: object
+          properties:
+            canchas:
+              type: array
+              items: {$ref: '#/components/schemas/Cancha'}
+    CanchaInput:
+      type: object
+      required: [nombre_cancha, superficie, techada]
+      properties:
+        nombre_cancha: {type: string, maxLength: 100, example: Cancha C}
+        superficie: {type: string, enum: [sintético, parquet], example: parquet}
+        techada: {type: boolean, example: true}
+    CanchaPatch:
+      type: object
+      properties:
+        nombre_cancha: {type: string, description: Nuevo nombre (solo si la cancha no tiene partidos).}
+        superficie: {type: string, enum: [sintético, parquet]}
+        techada: {type: boolean, example: true}
+    Cancha:
+      type: object
+      properties:
+        nombre_cancha: {type: string, example: Cancha A}
+        id_complejo: {type: integer, example: 1}
+        complejo: {type: string, example: Complejo Norte}
+        superficie: {type: string, example: sintético}
+        techada: {type: integer, description: 0 o 1, example: 0}
+
+    # Partidos
+    PartidoInput:
+      type: object
+      required: [id_torneo, numero_fecha, id_equipo_local, id_equipo_visitante, dia, id_turno, nombre_cancha, id_complejo]
+      properties:
+        id_torneo: {type: integer, example: 1}
+        numero_fecha: {type: integer, example: 6}
+        id_equipo_local: {type: integer, example: 2}
+        id_equipo_visitante: {type: integer, example: 4}
+        dia: {type: string, format: date, example: '2026-11-16'}
+        id_turno: {type: integer, example: 1}
+        nombre_cancha: {type: string, example: Cancha A}
+        id_complejo: {type: integer, example: 1}
+        estado:
+          allOf: [{$ref: '#/components/schemas/EstadoPartido'}]
+          description: Opcional; por defecto `programado`.
+    PartidoPatch:
+      type: object
+      description: Cualquier subconjunto de los campos de programación.
+      properties:
+        numero_fecha: {type: integer}
+        id_equipo_local: {type: integer}
+        id_equipo_visitante: {type: integer}
+        dia: {type: string, format: date, example: '2026-11-23'}
+        id_turno: {type: integer, example: 2}
+        nombre_cancha: {type: string}
+        id_complejo: {type: integer}
+        estado: {$ref: '#/components/schemas/EstadoPartido'}
+    EstadoPartidoInput:
+      type: object
+      required: [estado]
+      properties:
+        estado:
+          allOf: [{$ref: '#/components/schemas/EstadoPartido'}]
+          example: postergado
+    Partido:
+      type: object
+      properties:
+        id_partido: {type: integer, example: 7}
+        id_torneo: {type: integer, example: 1}
+        numero_fecha: {type: integer, example: 3}
+        id_equipo_local: {type: integer, example: 1}
+        equipo_local: {type: string, example: Halcones}
+        id_equipo_visitante: {type: integer, example: 4}
+        equipo_visitante: {type: string, example: Pumas}
+        dia: {type: string, format: date, example: '2026-10-19'}
+        id_turno: {type: integer, example: 1}
+        hora_inicio: {type: string, example: '18:00:00'}
+        hora_fin: {type: string, example: '19:00:00'}
+        nombre_cancha: {type: string, example: Cancha A}
+        id_complejo: {type: integer, example: 1}
+        complejo: {type: string, example: Complejo Norte}
+        estado: {$ref: '#/components/schemas/EstadoPartido'}
+        goles_local: {type: integer, nullable: true, description: null si no se jugó., example: 1}
+        goles_visitante: {type: integer, nullable: true, example: 1}
+    Resultado:
+      type: object
+      properties:
+        id_partido: {type: integer, example: 7}
+        equipo_local: {type: string, example: Halcones}
+        goles_local: {type: integer, example: 1}
+        equipo_visitante: {type: string, example: Pumas}
+        goles_visitante: {type: integer, example: 1}
+        goles:
+          type: array
+          items: {$ref: '#/components/schemas/Gol'}
+
+    # Planillas, goles y tarjetas
+    Participante:
+      type: object
+      required: [ci_jugador, id_equipo]
+      properties:
+        ci_jugador: {type: integer, example: 50000101}
+        id_equipo: {type: integer, example: 1}
+    PlanillaInput:
+      type: object
+      required: [participantes]
+      properties:
+        participantes:
+          type: array
+          maxItems: 20
+          items: {$ref: '#/components/schemas/Participante'}
+          example:
+            - {ci_jugador: 50000101, id_equipo: 1}
+            - {ci_jugador: 50000102, id_equipo: 1}
+            - {ci_jugador: 50000103, id_equipo: 1}
+            - {ci_jugador: 50000104, id_equipo: 1}
+            - {ci_jugador: 50000105, id_equipo: 1}
+            - {ci_jugador: 50000401, id_equipo: 4}
+            - {ci_jugador: 50000402, id_equipo: 4}
+            - {ci_jugador: 50000403, id_equipo: 4}
+            - {ci_jugador: 50000404, id_equipo: 4}
+            - {ci_jugador: 50000405, id_equipo: 4}
+    PlanillaItem:
+      type: object
+      properties:
+        id_partido: {type: integer, example: 7}
+        ci_jugador: {type: integer, example: 50000101}
+        nombre: {type: string, example: Sofia}
+        apellido: {type: string, example: Pereira}
+        id_equipo: {type: integer, example: 1}
+        equipo: {type: string, example: Halcones}
+    Habilitado:
+      type: object
+      properties:
+        id_equipo: {type: integer, example: 1}
+        equipo: {type: string, example: Halcones}
+        ci_jugador: {type: integer, example: 50000103}
+        nombre: {type: string, example: Camila}
+        apellido: {type: string, example: Fernandez}
+        numero_camiseta: {type: integer, example: 3}
+        suspendido: {type: boolean, example: false}
+        en_planilla: {type: boolean, example: true}
+    GolInput:
+      type: object
+      required: [ci_jugador, minuto]
+      properties:
+        ci_jugador: {type: integer, description: Debe figurar en la planilla., example: 50000101}
+        minuto: {type: integer, minimum: 0, maximum: 60, example: 12}
+        autogol: {type: boolean, default: false, example: false}
+    GolPatch:
+      type: object
+      properties:
+        ci_jugador: {type: integer}
+        minuto: {type: integer, minimum: 0, maximum: 60, example: 14}
+        autogol: {type: boolean}
+    GolCreado:
+      type: object
+      properties:
+        id_gol: {type: integer, example: 31}
+        id_partido: {type: integer, example: 7}
+        ci_jugador: {type: integer, example: 50000101}
+        minuto: {type: integer, example: 12}
+        autogol: {type: boolean, example: false}
+    Gol:
+      type: object
+      properties:
+        id_gol: {type: integer, example: 19}
+        id_partido: {type: integer, example: 7}
+        ci_jugador: {type: integer, example: 50000401}
+        nombre: {type: string, example: Sofia}
+        apellido: {type: string, example: Silva}
+        id_equipo: {type: integer, example: 4}
+        minuto: {type: integer, example: 18}
+        autogol: {type: boolean, example: false}
+    TarjetaInput:
+      type: object
+      required: [ci_jugador, minuto, color]
+      properties:
+        ci_jugador: {type: integer, example: 50000102}
+        minuto: {type: integer, minimum: 0, maximum: 60, example: 40}
+        color: {type: string, enum: [amarilla, roja], example: amarilla}
+    TarjetaPatch:
+      type: object
+      properties:
+        ci_jugador: {type: integer}
+        minuto: {type: integer, minimum: 0, maximum: 60, example: 41}
+        color: {type: string, enum: [amarilla, roja]}
+    TarjetaCreada:
+      type: object
+      properties:
+        id_tarjeta: {type: integer, example: 7}
+        id_partido: {type: integer, example: 7}
+        ci_jugador: {type: integer, example: 50000102}
+        minuto: {type: integer, example: 40}
+        color: {type: string, example: amarilla}
+    Tarjeta:
+      type: object
+      properties:
+        id_tarjeta: {type: integer, example: 1}
+        id_partido: {type: integer, example: 1}
+        ci_jugador: {type: integer, example: 50000103}
+        nombre: {type: string, example: Camila}
+        apellido: {type: string, example: Fernandez}
+        id_equipo: {type: integer, example: 1}
+        minuto: {type: integer, example: 52}
+        color: {type: string, example: roja}
+    Eventos:
+      type: object
+      properties:
+        partido:
+          type: object
+          properties:
+            id_partido: {type: integer}
+            id_torneo: {type: integer}
+            numero_fecha: {type: integer}
+            id_equipo_local: {type: integer}
+            id_equipo_visitante: {type: integer}
+            estado: {$ref: '#/components/schemas/EstadoPartido'}
+        planilla:
+          type: array
+          items: {$ref: '#/components/schemas/PlanillaItem'}
+        goles:
+          type: array
+          items: {$ref: '#/components/schemas/Gol'}
+        tarjetas:
+          type: array
+          items: {$ref: '#/components/schemas/Tarjeta'}
+
+    # Sanciones
+    SancionInput:
+      type: object
+      required: [ci_jugador, id_torneo, numero_fecha_inicio, cantidad_fechas]
+      properties:
+        ci_jugador: {type: integer, example: 50000203}
+        id_torneo: {type: integer, example: 1}
+        numero_fecha_inicio: {type: integer, example: 6}
+        cantidad_fechas: {type: integer, minimum: 1, maximum: 50, example: 2}
+        motivo: {type: string, enum: [disciplinaria], description: Opcional; solo se admite disciplinaria.}
+    SancionPatch:
+      type: object
+      properties:
+        numero_fecha_inicio: {type: integer, example: 7}
+        cantidad_fechas: {type: integer, minimum: 1, maximum: 50, example: 1}
+    Sancion:
+      type: object
+      properties:
+        id_sancion: {type: integer, description: Negativo si es automática., example: 1}
+        ci_jugador: {type: integer, example: 50000304}
+        nombre: {type: string, example: Luciano}
+        apellido: {type: string, example: Lopez}
+        id_torneo: {type: integer, example: 1}
+        id_equipo: {type: integer, nullable: true, example: 3}
+        equipo: {type: string, nullable: true, example: Leones}
+        motivo: {$ref: '#/components/schemas/MotivoSancion'}
+        numero_fecha_inicio: {type: integer, example: 3}
+        cantidad_fechas: {type: integer, example: 1}
+        origen: {type: string, enum: [manual, automatica], example: manual}

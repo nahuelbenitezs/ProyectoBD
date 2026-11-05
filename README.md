@@ -125,25 +125,156 @@ Se pueden incorporar tablas o atributos adicionales si su necesidad se fundament
 
 ## 🚀 Ejecución local
 
-La consigna requiere un instructivo completo para ejecutar la aplicación localmente. **Los comandos exactos se documentarán al definir la estructura y las dependencias reales del proyecto.**
+Requisitos: **Python 3.12+**, **MySQL 8.0.18+** (probado con 8.4) y, para la opción A, **Docker Desktop**.
 
-Requisitos mínimos previstos:
+### Opción A — Docker Compose (recomendada)
 
-- Python (versión a confirmar).
-- Servidor MySQL (versión a confirmar).
-- Dependencias del backend (a documentar).
-- Frontend y herramientas adicionales, si corresponde.
+Solo hace falta **Docker Desktop** (con Docker Compose v2). No se necesita instalar Python ni MySQL.
 
-Pasos que deberá cubrir la instalación final:
+**1. Configurar las claves.** En la raíz del repositorio:
 
-1. Clonar el repositorio.
-2. Configurar las credenciales y permisos de MySQL.
-3. Ejecutar el script de creación de base de datos y datos maestros.
-4. Cargar los datos de prueba.
-5. Instalar dependencias y levantar la aplicación.
-6. Verificar las funcionalidades y ejecutar los reportes.
+```bash
+cp .env.example .env
+```
 
-> **Pendiente:** agregar comandos verificables de instalación y ejecución cuando estén definidos.
+Completar `.env` con claves a elección (no se suben a GitHub):
+
+```dotenv
+MYSQL_ROOT_PASSWORD=una-clave-root
+MYSQL_ADMIN_PASSWORD=una-clave-admin
+MYSQL_PLANILLERO_PASSWORD=una-clave-planillero
+MYSQL_PORT=3306
+```
+
+**2. Levantar los servicios.**
+
+```bash
+docker compose up -d --build
+docker compose ps             # db debe figurar como "healthy"
+```
+
+La primera vez, MySQL tarda alrededor de un minuto en cargar el esquema y los datos de prueba. Al terminar quedan disponibles:
+
+| Servicio | URL | Contenido |
+| --- | --- | --- |
+| `frontend` | http://localhost:8080 | Interfaz web (activar el **modo API** desde la pantalla de ingreso) |
+| `backend` | http://localhost:5000/api/health | API REST en Flask |
+| `db` | `localhost:3306` | MySQL 8.4 con el esquema `torneo_ucu` |
+
+- MySQL se inicializa con `torneo_ucu_creacion.sql` y `backend/sql/sesiones.sql` sin modificarlos. [docker/mysql/init.sh](docker/mysql/init.sh) solo cambia el host de las cuentas técnicas a `'%'` y les asigna las claves del `.env`.
+- El contenedor de MySQL usa la hora de Uruguay (`-03:00`), porque los triggers comparan `NOW()` con el día y el turno de cada partido.
+
+**3. Verificar.**
+
+```bash
+curl http://localhost:5000/api/health        # {"status":"ok","database":"connected"}
+```
+
+**Comandos útiles:**
+
+```bash
+docker compose logs -f backend   # ver los logs de la API
+docker compose down              # detener (los datos se conservan)
+docker compose down -v           # detener y borrar la base; al volver a levantar se recarga el script
+docker compose up -d --build backend   # reconstruir la API después de cambiar código
+```
+
+> Si el puerto 3306 está ocupado por un MySQL local, cambiar `MYSQL_PORT` en `.env` (por ejemplo, `3307`).
+
+### Opción B — MySQL local
+
+1. Ejecutar `torneo_ucu_creacion.sql` como DBA y **guardar las claves aleatorias** que muestra `CREATE USER`.
+2. Ejecutar `backend/sql/sesiones.sql` (tabla de sesiones de la API).
+3. Configurar y levantar el backend:
+
+```bash
+cd backend
+cp .env.example .env          # completar MYSQL_ADMIN_PASSWORD y MYSQL_PLANILLERO_PASSWORD
+python -m venv .venv
+.venv/Scripts/activate        # Linux/macOS: source .venv/bin/activate
+pip install -r requirements.txt
+python app.py                 # http://127.0.0.1:5000/api/health
+```
+
+4. Frontend: `cd frontend && python -m http.server 5500` y activar el modo API desde la interfaz.
+
+Usuarios de prueba: `admin@demo.ucu.edu.uy` / `AdminDemo2026!` y `planillero@demo.ucu.edu.uy` / `PlanillaDemo2026!`.
+
+## 🧪 Pruebas del backend
+
+La suite tiene 85 pruebas en tres archivos:
+
+| Archivo | Qué prueba | ¿Requiere MySQL? |
+| --- | --- | --- |
+| [test_logic.py](backend/tests/test_logic.py) | Validaciones de cada entidad y transformación de reportes | No |
+| [test_api.py](backend/tests/test_api.py) | Cada endpoint con una base simulada: códigos HTTP, permisos por rol, SQL parametrizado, `COMMIT`/`ROLLBACK` y traducción de errores de triggers | No |
+| [test_integration.py](backend/tests/test_integration.py) | Flujo completo de un torneo contra MySQL real: planteles (11.º jugador, 3.er docente, otra facultad, duplicados), fixture (superposiciones, rivales repetidos), planillas, goles, autogol, 0-0, sanciones automáticas, plazo de 48 h, 12 reportes y permisos de las cuentas MySQL | Sí |
+
+### Con Docker (recomendado)
+
+Con la base levantada (`docker compose up -d`), ejecutar:
+
+```bash
+docker compose run --rm tests
+```
+
+El servicio `tests` usa la imagen del backend, se conecta al MySQL del servicio `db` y ejecuta **las 85 pruebas, incluidas las de integración**. Al terminar debe mostrar `Ran 85 tests ... OK`. Si se cambiaron dependencias o código del backend, agregar `--build`:
+
+```bash
+docker compose run --rm --build tests
+```
+
+El servicio pertenece al perfil `test`, por lo que `docker compose up` no lo inicia; solo corre a pedido.
+
+### Sin Docker para la API (venv local)
+
+```bash
+cd backend
+python -m venv .venv
+.venv/Scripts/activate                          # Linux/macOS: source .venv/bin/activate
+pip install -r requirements.txt pytest
+python -m pytest tests                          # unitarias + API (las de integración se omiten)
+RUN_INTEGRATION=1 python -m pytest tests        # todas, contra el MySQL indicado en backend/.env
+```
+
+Para usar el MySQL de Docker desde el venv, `backend/.env` debe tener `MYSQL_HOST=127.0.0.1`, el puerto de `MYSQL_PORT` y las mismas claves `MYSQL_ADMIN_PASSWORD` y `MYSQL_PLANILLERO_PASSWORD` del `.env` de la raíz.
+
+> Las pruebas de integración crean su propia edición (año siguiente al último cargado), jugadores y cancha, y juegan los partidos "ayer" según el reloj de MySQL. Por eso pueden repetirse sin recrear la base. Para volver a los datos originales: `docker compose down -v && docker compose up -d`.
+
+### Smoke test contra la API en ejecución
+
+```bash
+API_TEST_EMAIL=admin@demo.ucu.edu.uy API_TEST_PASSWORD='AdminDemo2026!' python backend/tests/smoke_live.py
+```
+
+## 🔌 API REST
+
+La documentación completa (OpenAPI 3.0) está en [backend/docs/openapi.yaml](backend/docs/openapi.yaml). Incluye esquemas, ejemplos con los datos de prueba y respuestas de error.
+
+**Probar en Postman:**
+1. *Import → File* → `backend/docs/openapi.yaml`. Se crea una colección con una carpeta por recurso (77 requests).
+2. Ejecutar *Sesión → Iniciar sesión* (`admin@demo.ucu.edu.uy` / `AdminDemo2026!`) y copiar el `token`.
+3. En la colección, pestaña *Variables*, agregar `bearerToken` con ese token.
+
+Todas las rutas cuelgan de `/api` y, salvo `health` y `auth/login`, requieren `Authorization: Bearer <token>`. Las lecturas están permitidas a ambos roles; las escrituras marcadas **A** son solo para administrador. Cada rol usa su propia cuenta técnica de MySQL, de modo que los permisos también se controlan en la base.
+
+| Recurso | Endpoints |
+| --- | --- |
+| Sesión | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `GET /health` |
+| Facultades **A** | `GET/POST /facultades`, `GET/PATCH/DELETE /facultades/{id}` |
+| Turnos **A** | `GET/POST /turnos`, `GET/PATCH/DELETE /turnos/{id}`, `GET /canchas/disponibles?dia=&id_complejo=` |
+| Jugadores **A** | `GET/POST /jugadores?id_facultad=&tipo=`, `GET/PATCH/DELETE /jugadores/{ci}`, `GET /jugadores/{ci}/suspension?id_torneo=&numero_fecha=` |
+| Torneos **A** | `GET/POST /torneos`, `GET/PATCH/DELETE /torneos/{id}`, `GET /torneos/{id}/equipos`, `GET /torneos/{id}/fechas` |
+| Equipos **A** | `GET/POST /equipos?id_torneo=&id_facultad=`, `GET/PATCH/DELETE /equipos/{id}` (al crear, el capitán se inscribe en el plantel en la misma transacción) |
+| Planteles **A** | `GET/POST /equipos/{id}/plantel`, `PATCH/DELETE /equipos/{id}/plantel/{ci}` |
+| Complejos y canchas **A** | `GET/POST /complejos`, `GET/PATCH/DELETE /complejos/{id}`, `GET /canchas`, `GET/POST /complejos/{id}/canchas`, `GET/PATCH/DELETE /complejos/{id}/canchas/{nombre}` |
+| Partidos **A** | `GET/POST /partidos?id_torneo=&numero_fecha=&id_equipo=&estado=`, `GET/PATCH/DELETE /partidos/{id}`, `PATCH /partidos/{id}/estado`, `GET /partidos/{id}/resultado` |
+| Planilla (ambos roles) | `GET /partidos/{id}/habilitados`, `GET/PUT/POST /partidos/{id}/planilla`, `DELETE /partidos/{id}/planilla/{ci}`, `GET /partidos/{id}/eventos` |
+| Goles y tarjetas (ambos roles) | `GET/POST /partidos/{id}/goles`, `PATCH/DELETE /partidos/{id}/goles/{id_gol}`, ídem `/tarjetas` |
+| Sanciones **A** | `GET/POST /sanciones?id_torneo=&ci_jugador=&id_equipo=&motivo=&origen=`, `GET/PATCH/DELETE /sanciones/{id}` (las automáticas tienen id negativo y son de solo lectura) |
+| Reportes | `GET /reportes`, `GET /reportes/{slug}?id_torneo=`, `GET /bootstrap` |
+
+Códigos de respuesta: `400` validación, `401` sin sesión, `403` rol o cuenta MySQL sin permiso, `404` inexistente, `409` regla de negocio (mensaje del trigger), duplicado o referencia.
 
 ## 🧪 Datos de prueba
 
@@ -446,7 +577,8 @@ backend/
 | Seguridad | Cuentas y permisos diferenciados de MySQL | Configurado en SQL; pendiente de comprobar accesos |
 | Datos de prueba | Ampliación de partidos, estados, autogol y empate 0-0 | Incorporados al script |
 | Verificación | Script para comprobar resultados y restricciones | Preparado; pendiente de ejecutar en MySQL |
-| Backend | Checklist de módulos para API Python sin ORM | Planificado; no implementado |
+| Backend | API REST Flask sin ORM: 77 endpoints para todos los ABM, planillas, sanciones y reportes | Implementado; 85 pruebas (13 de integración contra MySQL real) |
+| Docker | `docker-compose.yml` con MySQL, API y frontend | Implementado |
 
 ### Registro cronológico de trabajo
 
