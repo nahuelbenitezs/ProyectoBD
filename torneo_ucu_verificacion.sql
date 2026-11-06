@@ -1,13 +1,21 @@
--- Verificacion de la carga de DEMOSTRACION de datos_torneo_con_empate_0_0.sql
+-- Verificacion de la carga de demostracion de torneo_ucu_creacion.sql
 -- MySQL 8.0.16+. Ejecutar DESPUES del script principal, antes de modificar datos.
 -- Comprueba los 12 reportes, autogoles, estados y sanciones automáticas.
 -- Las pruebas negativas deben ser rechazadas por las restricciones de BD.
 
+USE torneo_ucu;
+
+DROP PROCEDURE IF EXISTS verificar_datos_torneo_demo;
 DELIMITER $$
 CREATE PROCEDURE verificar_datos_torneo_demo()
 BEGIN
     DECLARE n INT DEFAULT 0;
     DECLARE rechazado BOOLEAN DEFAULT FALSE;
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
 
     SELECT COUNT(*) INTO n FROM equipo WHERE id_torneo = 1;
     IF n <> 6 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Fallo: cantidad de equipos'; END IF;
@@ -126,6 +134,85 @@ BEGIN
     END;
     IF NOT rechazado THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Fallo: sancion automatica editable';
+    END IF;
+
+    -- Validaciones negativas: cada intento se revierte y exige el rechazo del trigger
+    -- (SQLSTATE 45000), evitando falsos positivos por una FK o un UNIQUE diferente.
+    START TRANSACTION;
+    SET rechazado = FALSE;
+    BEGIN
+        DECLARE CONTINUE HANDLER FOR SQLSTATE '45000' SET rechazado = TRUE;
+        UPDATE jugador SET nombre = '   ' WHERE ci = 50000101;
+    END;
+    ROLLBACK;
+    IF NOT rechazado THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Fallo: nombre vacio aceptado';
+    END IF;
+
+    START TRANSACTION;
+    SET rechazado = FALSE;
+    BEGIN
+        DECLARE CONTINUE HANDLER FOR SQLSTATE '45000' SET rechazado = TRUE;
+        UPDATE jugador SET apellido = '   ' WHERE ci = 50000101;
+    END;
+    ROLLBACK;
+    IF NOT rechazado THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Fallo: apellido vacio aceptado';
+    END IF;
+
+    START TRANSACTION;
+    SET rechazado = FALSE;
+    BEGIN
+        DECLARE CONTINUE HANDLER FOR SQLSTATE '45000' SET rechazado = TRUE;
+        UPDATE jugador SET email = 'sin-correo' WHERE ci = 50000101;
+    END;
+    ROLLBACK;
+    IF NOT rechazado THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Fallo: correo invalido aceptado';
+    END IF;
+
+    START TRANSACTION;
+    SET rechazado = FALSE;
+    BEGIN
+        DECLARE CONTINUE HANDLER FOR SQLSTATE '45000' SET rechazado = TRUE;
+        UPDATE jugador SET fecha_nacimiento = DATE_ADD(CURDATE(), INTERVAL 1 DAY) WHERE ci = 50000101;
+    END;
+    ROLLBACK;
+    IF NOT rechazado THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Fallo: nacimiento futuro aceptado';
+    END IF;
+
+    START TRANSACTION;
+    SET rechazado = FALSE;
+    BEGIN
+        DECLARE CONTINUE HANDLER FOR SQLSTATE '45000' SET rechazado = TRUE;
+        INSERT INTO jugador (ci,nombre,apellido,email,fecha_nacimiento,id_facultad,tipo) VALUES (12345,'Prueba','SQL','validacion@example.edu.uy','2000-01-01',1,'grado');
+    END;
+    ROLLBACK;
+    IF NOT rechazado THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Fallo: cedula corta aceptada';
+    END IF;
+
+    START TRANSACTION;
+    SET rechazado = FALSE;
+    BEGIN
+        DECLARE CONTINUE HANDLER FOR SQLSTATE '45000' SET rechazado = TRUE;
+        UPDATE turno SET hora_inicio = '19:00:00', hora_fin = '20:00:00' WHERE id_turno = 1;
+    END;
+    ROLLBACK;
+    IF NOT rechazado THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Fallo: turno historico modificable';
+    END IF;
+
+    START TRANSACTION;
+    SET rechazado = FALSE;
+    BEGIN
+        DECLARE CONTINUE HANDLER FOR SQLSTATE '45000' SET rechazado = TRUE;
+        DELETE FROM equipo WHERE id_equipo = 1;
+    END;
+    ROLLBACK;
+    IF NOT rechazado THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Fallo: equipo en curso eliminable';
     END IF;
 
     SELECT 'OK: 12 reportes, empate 0-0, planillas, estados, sanciones y protecciones' AS resultado;

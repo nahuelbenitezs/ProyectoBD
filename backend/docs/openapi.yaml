@@ -626,7 +626,7 @@ paths:
     delete:
       tags: [Equipos]
       summary: Eliminar equipo (administrador)
-      description: Falla con `409` si el equipo tiene plantel o partidos.
+      description: Solo durante inscripción y sin partidos, historial de planillas ni sanciones asociadas. Elimina también el plantel, incluido el capitán, y conserva los jugadores. Falla con `409` si no se cumplen esas condiciones.
       operationId: eliminarEquipo
       responses:
         '204': {$ref: '#/components/responses/NoContent'}

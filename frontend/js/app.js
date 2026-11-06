@@ -180,7 +180,7 @@ function renderModal(){
  if(kind==='cancha'){
   const [cid,cname]=String(id||'').includes('|')?String(id).split('|'):[String(extra||state.db.complejo[0]?.id_complejo||''),''];
   const p=state.db.cancha.find(x=>+x.id_complejo===+cid&&x.nombre_cancha===cname)||{};
-  return formModal(cname?'Editar cancha':'Nueva cancha','Superficie y techado de la cancha.',`<div class="form-grid">${selectField('Complejo','id_complejo',state.db.complejo.map(c=>[c.id_complejo,c.nombre]),cid,cname?'disabled':'required')}${inputField('Nombre de cancha','nombre_cancha',p.nombre_cancha||'','text',`required maxlength="100" ${cname?'readonly':''}`)}${selectField('Superficie','superficie',[['sintético','Sintético'],['parquet','Parquet']],p.superficie||'sintético')}${selectField('¿Es techada?','techada',[['true','Sí'],['false','No']],String(p.techada??false))}</div>`,kind,cname?'Guardar cambios':'Crear cancha');
+  return formModal(cname?'Editar cancha':'Nueva cancha','Superficie y techado de la cancha.',`<div class="form-grid">${selectField('Complejo','id_complejo',state.db.complejo.map(c=>[c.id_complejo,c.nombre]),cid,cname?'disabled':'required')}${inputField('Nombre de cancha','nombre_cancha',p.nombre_cancha||'','text',`required maxlength="100" ${cname?'readonly':''}`)}${selectField('Superficie','superficie',[['sintético','Sintético'],['parquet','Parquet']],p.superficie||'sintético')}${selectField('¿Es techada?','techada',[['true','Sí'],['false','No']],String(Boolean(p.techada)))}</div>`,kind,cname?'Guardar cambios':'Crear cancha');
  }
  if(kind==='torneo'){
   const p=state.db.torneo.find(x=>+x.id_torneo===+id)||{};
@@ -224,7 +224,16 @@ function notify(msg,type='success'){
 const rerender=()=>{app.innerHTML=layout();document.documentElement.dataset.theme=state.theme};
 const rerenderContent=()=>{const el=document.getElementById('main-body');if(el)el.innerHTML=content()};
 const rerenderModal=()=>{const old=document.querySelector('.modal-backdrop');if(old)old.outerHTML=renderModal()};
-async function refreshReport(){if(state.page!=='reportes'||!state.db)return;state.reportLoading=true;rerenderContent();try{state.reportRows=await loadReport(state.report,tId(),state.db)}catch(e){state.reportRows=[];notify(e.message,'error')}finally{state.reportLoading=false;rerenderContent()}}
+let reportRequest=0;
+async function refreshReport(){
+ if(state.page!=='reportes'||!state.db)return;
+ const request=++reportRequest,report=state.report,tournament=tId(),db=state.db,user=state.user;
+ const current=()=>request===reportRequest&&state.page==='reportes'&&state.report===report&&tId()===tournament&&state.db===db&&state.user===user;
+ state.reportLoading=true;rerenderContent();
+ try{const rows=await loadReport(report,tournament,db);if(current())state.reportRows=rows}
+ catch(e){if(current()){state.reportRows=[];notify(e.message,'error')}}
+ finally{if(current()){state.reportLoading=false;rerenderContent()}}
+}
 function navigate(page){state.page=page;state.menuOpen=false;state.search='';window.location.hash=page;rerender();if(page==='reportes')refreshReport();window.scrollTo({top:0,behavior:'smooth'})}
 function open(kind,id='',extra=''){state.modal={kind,id,extra};rerenderModalOrFull()}
 function rerenderModalOrFull(){const existing=document.querySelector('.modal-backdrop');if(existing)existing.remove();if(state.modal)document.querySelector('.shell')?.insertAdjacentHTML('beforeend',renderModal())}
@@ -252,9 +261,9 @@ async function handleAction(a,id){
  if(a==='toggle-mode'){
   setMode(isDemo()?'api':'demo');state.error='';state.user=isDemo()?demoUser():null;state.db=null;
   if(state.user)try{state.db=await loadData()}catch(e){state.error=e.message}
-  rerender();return;
+  rerender();if(state.page==='reportes')refreshReport();return;
  }
- if(a==='login-demo') {state.user=demoUser(id==='planillero'?'planillero':'administrador');state.error='';if(!state.db)state.db=await loadData();rerender();return}
+ if(a==='login-demo') {state.user=demoUser(id==='planillero'?'planillero':'administrador');state.error='';if(!state.db)state.db=await loadData();rerender();if(state.page==='reportes')refreshReport();return}
  if(!state.user)return;
  if(a==='reset-demo') {if(window.confirm('¿Reiniciar todos los cambios de demostración realizados en este navegador?')){demoReset();state.db=await loadData();rerender();notify('Datos del SQL restaurados.')}return}
  if(a==='fixture-filter'){state.status=id;rerenderContent();return}
@@ -333,7 +342,7 @@ app.addEventListener('click',async e=>{
 app.addEventListener('submit',async e=>{
  e.preventDefault();const form=e.target;
  if(form.id==='login-form'){
-  const f=Object.fromEntries(new FormData(form));state.error='';const button=form.querySelector('button[type=submit]');button.disabled=true;try{state.user=await login(f.correo,f.contrasena);state.db=await loadData();state.tournament=state.db.torneo[0]?.id_torneo||1;rerender()}catch(err){logout();state.user=null;state.db=null;state.error=err.message;rerender()}return;
+  const f=Object.fromEntries(new FormData(form));state.error='';const button=form.querySelector('button[type=submit]');button.disabled=true;try{state.user=await login(f.correo,f.contrasena);state.db=await loadData();state.tournament=state.db.torneo[0]?.id_torneo||1;rerender();if(state.page==='reportes')refreshReport()}catch(err){logout();state.user=null;state.db=null;state.error=err.message;rerender()}return;
  }
  if(!state.user||!form.dataset.form)return;
  const allowed=['planilla','goal','card'];if(!admin()&&!allowed.includes(form.dataset.form)){notify('Acción restringida al administrador.','error');return}

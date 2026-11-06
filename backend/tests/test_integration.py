@@ -62,7 +62,25 @@ class TorneoCompletoTest(unittest.TestCase):
             _, body = self.api('POST', '/auth/login', {'correo': correo, 'contrasena': clave}, token=None, expected=200)
             self.S[key] = body['token']
         self.api('POST', '/auth/login', {'correo': ADMIN[0], 'contrasena': 'mala'}, token=None, expected=401)
-        self.api('POST', '/jugadores', {}, token='planillero', expected=403)
+        administracion = [
+            (method, path + suffix)
+            for path in ('/facultades', '/turnos', '/jugadores', '/torneos',
+                         '/equipos', '/complejos', '/partidos', '/sanciones')
+            for method, suffix in (('POST', ''), ('PATCH', '/1'), ('DELETE', '/1'))
+        ]
+        administracion.extend((
+            ('POST', '/equipos/1/plantel'),
+            ('PATCH', '/equipos/1/plantel/50000101'),
+            ('DELETE', '/equipos/1/plantel/50000101'),
+            ('POST', '/complejos/1/canchas'),
+            ('PATCH', '/complejos/1/canchas/Cancha%20A'),
+            ('DELETE', '/complejos/1/canchas/Cancha%20A'),
+            ('PATCH', '/partidos/1/estado'),
+        ))
+        self.assertEqual(len(administracion), 31)
+        for method, path in administracion:
+            with self.subTest(method=method, path=path):
+                self.api(method, path, {}, token='planillero', expected=403)
         self.assertEqual(self.api('GET', '/auth/me', token='planillero')[1]['rol'], 'planillero')
 
     def test_02_permisos_mysql_del_planillero(self):
@@ -162,6 +180,24 @@ class TorneoCompletoTest(unittest.TestCase):
         self.api('PATCH', f"/equipos/{self.S['A']}/plantel/50000107", {'numero_camiseta': 70}, expected=200)
         _, equipo = self.api('GET', f"/equipos/{self.S['A']}", expected=200)
         self.assertEqual(len(equipo['plantel']), 10)
+
+    def test_07b_baja_equipo_en_inscripcion(self):
+        """Eliminar un equipo también libera su plantel, incluido el capitán."""
+        _, equipo = self.api('POST', '/equipos', {
+            'nombre': 'IT Baja', 'id_torneo': self.S['torneo'],
+            'id_facultad': 6, 'ci_capitan': 50000601}, expected=201)
+        ruta = f"/equipos/{equipo['id_equipo']}"
+        self.api('DELETE', ruta, token='planillero', expected=403)
+        _, plantel = self.api('GET', ruta + '/plantel', expected=200)
+        self.assertEqual([p['ci_jugador'] for p in plantel], [50000601])
+        self.api('DELETE', ruta, expected=204)
+        self.api('GET', ruta, expected=404)
+        self.api('GET', '/jugadores/50000601', expected=200)
+        # La inscripción se eliminó: el mismo jugador puede capitanear otro equipo.
+        _, nuevo = self.api('POST', '/equipos', {
+            'nombre': 'IT Baja 2', 'id_torneo': self.S['torneo'],
+            'id_facultad': 6, 'ci_capitan': 50000601}, expected=201)
+        self.api('DELETE', f"/equipos/{nuevo['id_equipo']}", expected=204)
 
     def test_08_inicio_de_edicion(self):
         t = self.S['torneo']

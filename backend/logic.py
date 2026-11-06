@@ -77,7 +77,9 @@ def boolean(value, title):
 
 
 def choice(value, options, message):
-    if value not in options:
+    # Los campos de catálogo son cadenas: listas/objetos JSON deben producir
+    # un error de validación, no un TypeError al consultar un frozenset.
+    if not isinstance(value, str) or value not in options:
         raise ValidationError(message)
     return value
 
@@ -109,9 +111,8 @@ def validate_player(payload, *, expected_ci=None):
         raise ValidationError('La fecha de nacimiento debe ser válida y anterior a hoy.')
     result['fecha_nacimiento'] = born.isoformat()
     result['id_facultad'] = positive_int(payload.get('id_facultad'), 'Facultad')
-    if payload.get('tipo') not in TIPOS:
-        raise ValidationError('El tipo debe ser grado, posgrado, docente o funcionario.')
-    result['tipo'] = payload['tipo']
+    result['tipo'] = choice(payload.get('tipo'), TIPOS,
+                            'El tipo debe ser grado, posgrado, docente o funcionario.')
     return result
 
 

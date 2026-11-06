@@ -19,8 +19,16 @@ adapt /sql/torneo_ucu_creacion.sql | run_sql > /dev/null
 echo '[init] sesiones.sql'
 adapt /sql/sesiones.sql | run_sql
 
+# NO_BACKSLASH_ESCAPES hace literal la barra inversa. Las comillas simples
+# se duplican para construir cada literal SQL sin cambiar la clave recibida.
+sql_password() {
+  local value=${1//\'/\'\'}
+  printf "'%s'" "$value"
+}
+
 echo '[init] claves de las cuentas técnicas'
 run_sql <<SQL
-ALTER USER 'torneo_app_administrador'@'%' IDENTIFIED BY '${MYSQL_ADMIN_PASSWORD}';
-ALTER USER 'torneo_app_planillero'@'%' IDENTIFIED BY '${MYSQL_PLANILLERO_PASSWORD}';
+SET SESSION sql_mode = 'NO_BACKSLASH_ESCAPES';
+ALTER USER 'torneo_app_administrador'@'%' IDENTIFIED BY $(sql_password "${MYSQL_ADMIN_PASSWORD}");
+ALTER USER 'torneo_app_planillero'@'%' IDENTIFIED BY $(sql_password "${MYSQL_PLANILLERO_PASSWORD}");
 SQL

@@ -80,9 +80,16 @@ class AuthTests(APITestCase):
         self.assertTrue(self.db.executed('DELETE FROM sesion_api'))
 
     def test_planillero_cannot_use_admin_routes(self):
-        for method, path in (('POST', '/jugadores'), ('POST', '/equipos'), ('POST', '/partidos'),
-                             ('PATCH', '/torneos/1'), ('DELETE', '/complejos/1'), ('POST', '/sanciones'),
-                             ('POST', '/equipos/1/plantel'), ('PATCH', '/partidos/1/estado')):
+        routes = []
+        for collection in ('jugadores', 'equipos', 'complejos', 'torneos', 'facultades',
+                           'turnos', 'partidos', 'sanciones'):
+            routes.extend((('POST', '/' + collection), ('PATCH', '/' + collection + '/1'),
+                           ('DELETE', '/' + collection + '/1')))
+        routes.extend((('POST', '/equipos/1/plantel'), ('PATCH', '/equipos/1/plantel/1234567'),
+                       ('DELETE', '/equipos/1/plantel/1234567'), ('POST', '/complejos/1/canchas'),
+                       ('PATCH', '/complejos/1/canchas/A'), ('DELETE', '/complejos/1/canchas/A'),
+                       ('PATCH', '/partidos/1/estado')))
+        for method, path in routes:
             with self.subTest(path=path):
                 self.assertStatus(self.call(method, path, token=PLANILLERO_TOKEN, json={}), 403)
         self.assertFalse([q for q in self.db.queries if not q[0].startswith('SELECT')])
@@ -98,6 +105,23 @@ class AuthTests(APITestCase):
 
 
 class ErrorTranslationTests(APITestCase):
+    def test_structured_catalog_fields_are_400_json(self):
+        self.db.on('FROM partido WHERE id_partido', PARTIDO_JUGADO)
+        for invalid in ([], {}, None, True, 1):
+            for path, payload in (
+                ('/partidos/7/tarjetas', {'ci_jugador': 50000401, 'minuto': 3, 'color': invalid}),
+                ('/partidos/7/estado', {'estado': invalid}),
+                ('/jugadores', {'ci': 51234567, 'nombre': 'Ana', 'apellido': 'Suárez',
+                                 'email': 'ana@ucu.edu.uy', 'fecha_nacimiento': '2001-05-04',
+                                 'id_facultad': 1, 'tipo': invalid}),
+            ):
+                method = 'PATCH' if path.endswith('/estado') else 'POST'
+                with self.subTest(path=path, value=invalid):
+                    response = self.call(method, path, json=payload)
+                    self.assertStatus(response, 400)
+                    self.assertIn('error', response.get_json())
+        self.assertFalse(self.db.executed('INSERT INTO tarjeta') + self.db.executed('INSERT INTO jugador'))
+
     def test_trigger_signal_becomes_409_and_rolls_back(self):
         self.db.on('FROM equipo e JOIN facultad', {'id_equipo': 1, 'id_torneo': 1})
         self.db.on('INSERT INTO equipo_jugador_torneo', signal('El plantel no puede tener mas de 10 jugadores'))

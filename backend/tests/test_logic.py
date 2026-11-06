@@ -45,6 +45,11 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             validate_player({**self.player, 'tipo': 'director'})
 
+    def test_player_rejects_structured_type(self):
+        for invalid in ([], {}, None, True, 1):
+            with self.subTest(tipo=invalid), self.assertRaises(ValidationError):
+                validate_player({**self.player, 'tipo': invalid})
+
     def test_ci_cannot_change(self):
         with self.assertRaises(ValidationError):
             validate_player({**self.player, 'ci': 50000101}, expected_ci=50000999)
@@ -125,6 +130,19 @@ class EntityValidationTests(unittest.TestCase):
                 validate_gol({'ci_jugador': 1234567, 'minuto': bad})
         with self.assertRaises(ValidationError):
             validate_tarjeta({'ci_jugador': 1234567, 'minuto': 10, 'color': 'azul'})
+
+    def test_catalog_fields_reject_structured_values(self):
+        partido = {'id_torneo': 1, 'numero_fecha': 1, 'id_equipo_local': 1,
+                   'id_equipo_visitante': 2, 'dia': '2026-10-05', 'id_turno': 1,
+                   'nombre_cancha': 'Cancha A', 'id_complejo': 1}
+        for invalid in ([], {}, None, True, 1):
+            for validate, payload in (
+                (validate_tarjeta, {'ci_jugador': 1234567, 'minuto': 10, 'color': invalid}),
+                (validate_cancha, {'nombre_cancha': 'A', 'superficie': invalid, 'techada': True}),
+                (validate_partido, {**partido, 'estado': invalid}),
+            ):
+                with self.subTest(validator=validate.__name__, value=invalid), self.assertRaises(ValidationError):
+                    validate(payload)
 
     def test_only_disciplinary_sanctions_are_manual(self):
         data = validate_sancion({'ci_jugador': 1234567, 'id_torneo': 1,
